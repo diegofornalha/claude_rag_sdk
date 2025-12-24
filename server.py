@@ -457,12 +457,41 @@ async def reset_session(request: Request, api_key: str = Depends(verify_api_key)
 @app.get("/sessions")
 async def list_sessions():
     """List all sessions."""
+    from agentfs_sdk import AgentFS, AgentFSOptions
     sessions = []
 
     # Check AgentFS directory for session databases
     if AGENTFS_DIR.exists():
+        # Only get main session DBs (not _rag.db)
         for db_file in sorted(AGENTFS_DIR.glob("chat-*.db"), key=lambda f: f.stat().st_mtime, reverse=True):
             session_id = db_file.stem
+
+            # Skip _rag databases (those are separate RAG DBs)
+            if session_id.endswith("_rag"):
+                continue
+
+            # Try to get message count from KV
+            message_count = 0
+            output_count = 0
+            try:
+                # Open AgentFS for this session to get data
+                session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
+
+                # Get message count from conversation history
+                history = await session_agentfs.kv.get("conversation:history")
+                if history:
+                    message_count = len(history)
+
+                # Get output count from filesystem
+                try:
+                    outputs = await session_agentfs.fs.readdir("/outputs")
+                    output_count = len(outputs) if outputs else 0
+                except:
+                    output_count = 0
+
+                await session_agentfs.close()
+            except Exception as e:
+                print(f"[WARN] Could not read session {session_id}: {e}")
 
             sessions.append({
                 "session_id": session_id,
@@ -470,6 +499,9 @@ async def list_sessions():
                 "db_size": db_file.stat().st_size,
                 "updated_at": db_file.stat().st_mtime * 1000,
                 "is_current": session_id == current_session_id,
+                "message_count": message_count,
+                "has_outputs": output_count > 0,
+                "output_count": output_count,
             })
 
     return {"count": len(sessions), "sessions": sessions}
