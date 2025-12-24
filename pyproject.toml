@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-rag-sdk"
+version = "0.1.0"
+description = "RAG SDK for Claude with AgentFS integration - Semantic search, hybrid search, and AI-powered Q&A"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["ai", "rag", "claude", "anthropic", "agentfs", "semantic-search", "embeddings", "llm"]
+authors = [
+    {name = "Claude Partner"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    # AgentFS - base para filesystem, KV store e tool tracking
+    "agentfs-sdk>=0.4.0",
+    "pyturso>=0.4.0",
+
+    # Claude Agent SDK - para queries com reasoning
+    "claude-agent-sdk",
+
+    # MCP Server
+    "fastmcp>=0.1.0",
+
+    # Embeddings
+    "fastembed>=0.3.0",
+
+    # Vector Database
+    "apsw>=3.45.0",
+    "sqlite-vec>=0.1.0",
+
+    # Utilities
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+reranking = [
+    "sentence-transformers>=2.2.0",
+]
+all = [
+    "claude-rag-sdk[dev,reranking]",
+]
+
+[project.urls]
+Homepage = "https://github.com/anthropics/claude-rag-sdk"
+Documentation = "https://github.com/anthropics/claude-rag-sdk#readme"
+Repository = "https://github.com/anthropics/claude-rag-sdk"
+Issues = "https://github.com/anthropics/claude-rag-sdk/issues"
+
+[tool.setuptools.packages.find]
+include = ["claude_rag_sdk*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
