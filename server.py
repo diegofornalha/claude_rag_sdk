@@ -11,7 +11,7 @@ Production-ready FastAPI server with:
 """
 
 from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -20,6 +20,8 @@ from typing import Optional
 import json
 import os
 import asyncio
+import time
+import uuid
 
 # Claude RAG SDK
 from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions, AgentModel, EmbeddingModel
@@ -34,9 +36,7 @@ from claude_rag_sdk.core.auth import verify_api_key, is_auth_enabled
 # CONFIGURATION
 # =============================================================================
 
-OUTPUTS_DIR = Path(__file__).parent / "outputs"
-AUDIT_DIR = Path.home() / ".claude" / ".agentfs" / "audit"
-SESSIONS_DIR = Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend"
+AGENTFS_DIR = Path.home() / ".claude" / ".agentfs"
 
 # Global RAG instance
 rag: Optional[ClaudeRAG] = None
@@ -54,7 +54,6 @@ async def get_rag() -> ClaudeRAG:
 
     if rag is None:
         # Generate session ID
-        import uuid
         current_session_id = f"chat-{uuid.uuid4().hex[:8]}"
 
         # Create RAG instance
@@ -69,18 +68,25 @@ async def get_rag() -> ClaudeRAG:
 
         rag = await ClaudeRAG.open(options)
 
-        # Create session output directory
-        session_output_dir = OUTPUTS_DIR / current_session_id
-        session_output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Store session info
+        # Store session info in KV
         await rag.kv.set("session:info", {
             "id": current_session_id,
-            "created_at": asyncio.get_event_loop().time(),
+            "created_at": time.time(),
         })
 
-        # Write current session file
-        session_file = Path.home() / ".claude" / ".agentfs" / "current_session"
+        # Create output directories in AgentFS filesystem
+        await rag.fs.mkdir("/outputs")
+        await rag.fs.mkdir("/reports")
+        await rag.fs.mkdir("/logs")
+
+        # Write session start log
+        await rag.fs.write_file(
+            f"/logs/session_start.txt",
+            f"Session {current_session_id} started at {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        # Write current session file (for external tools)
+        session_file = AGENTFS_DIR / "current_session"
         session_file.parent.mkdir(parents=True, exist_ok=True)
         session_file.write_text(current_session_id)
 
@@ -268,7 +274,7 @@ async def chat(
             "confidence": response.confidence,
         })
 
-        # Store in conversation history
+        # Store in conversation history (KV)
         history = await r.kv.get("conversation:history") or []
         history.append({
             "role": "user",
@@ -280,6 +286,19 @@ async def chat(
             "citations": response.citations,
         })
         await r.kv.set("conversation:history", history[-50:])  # Keep last 50
+
+        # Save response to filesystem for persistence
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        await r.fs.write_file(
+            f"/outputs/chat_{timestamp}.json",
+            json.dumps({
+                "timestamp": timestamp,
+                "question": chat_request.message,
+                "answer": response.answer,
+                "citations": response.citations,
+                "confidence": response.confidence,
+            }, indent=2, ensure_ascii=False)
+        )
 
         return ChatResponse(response=response.answer)
 
@@ -406,23 +425,22 @@ async def get_current_session():
 
     # Get session info from KV
     session_info = None
+    output_files = []
     if rag:
         try:
             session_info = await rag.kv.get("session:info")
+            # List outputs from AgentFS filesystem
+            output_files = await rag.fs.readdir("/outputs")
         except:
             pass
-
-    # Check outputs
-    session_output_dir = OUTPUTS_DIR / session_id
-    has_outputs = session_output_dir.exists()
-    output_count = len(list(session_output_dir.iterdir())) if has_outputs else 0
 
     return {
         "active": True,
         "session_id": session_id,
         "info": session_info,
-        "has_outputs": has_outputs,
-        "output_count": output_count,
+        "has_outputs": len(output_files) > 0,
+        "output_count": len(output_files),
+        "outputs": output_files[:10],  # Last 10 files
     }
 
 
@@ -446,24 +464,16 @@ async def list_sessions():
     """List all sessions."""
     sessions = []
 
-    # Check AgentFS directory
-    agentfs_dir = Path.home() / ".claude" / ".agentfs"
-    if agentfs_dir.exists():
-        for db_file in sorted(agentfs_dir.glob("chat-*.db"), key=lambda f: f.stat().st_mtime, reverse=True):
+    # Check AgentFS directory for session databases
+    if AGENTFS_DIR.exists():
+        for db_file in sorted(AGENTFS_DIR.glob("chat-*.db"), key=lambda f: f.stat().st_mtime, reverse=True):
             session_id = db_file.stem
-
-            # Check for outputs
-            session_output_dir = OUTPUTS_DIR / session_id
-            has_outputs = session_output_dir.exists()
-            output_count = len(list(session_output_dir.iterdir())) if has_outputs else 0
 
             sessions.append({
                 "session_id": session_id,
                 "db_file": str(db_file),
                 "db_size": db_file.stat().st_size,
                 "updated_at": db_file.stat().st_mtime * 1000,
-                "has_outputs": has_outputs,
-                "output_count": output_count,
                 "is_current": session_id == current_session_id,
             })
 
@@ -472,97 +482,147 @@ async def list_sessions():
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a session."""
-    import shutil
-
+    """Delete a session (deletes AgentFS database which includes fs, kv, tools)."""
     # Don't delete current session
     if session_id == current_session_id:
         return {"success": False, "error": "Cannot delete active session"}
 
     deleted = []
 
-    # Delete AgentFS database
-    agentfs_dir = Path.home() / ".claude" / ".agentfs"
+    # Delete AgentFS database files (includes fs, kv, tools data)
     for pattern in [f"{session_id}.db", f"{session_id}.db-wal", f"{session_id}.db-shm", f"{session_id}_rag.db"]:
-        f = agentfs_dir / pattern
+        f = AGENTFS_DIR / pattern
         if f.exists():
             f.unlink()
             deleted.append(str(f))
 
-    # Delete audit file
-    audit_file = AUDIT_DIR / f"{session_id}.jsonl"
+    # Delete audit file if exists
+    audit_file = AGENTFS_DIR / "audit" / f"{session_id}.jsonl"
     if audit_file.exists():
         audit_file.unlink()
         deleted.append(str(audit_file))
-
-    # Delete outputs
-    outputs_dir = OUTPUTS_DIR / session_id
-    if outputs_dir.exists():
-        shutil.rmtree(outputs_dir)
-        deleted.append(str(outputs_dir))
 
     return {"success": True, "deleted": deleted}
 
 
 # =============================================================================
-# OUTPUT ENDPOINTS
+# OUTPUT ENDPOINTS (using AgentFS filesystem)
 # =============================================================================
 
 @app.get("/outputs")
-async def list_outputs(session_id: Optional[str] = None):
-    """List output files."""
-    sid = session_id or get_current_session_id()
-    if not sid:
-        return {"files": [], "session_id": None}
-
-    outputs_dir = OUTPUTS_DIR / sid
-    if not outputs_dir.exists():
-        return {"files": [], "session_id": sid}
-
-    files = []
-    for file in outputs_dir.iterdir():
-        if file.is_file():
-            stat = file.stat()
-            files.append({
-                "name": file.name,
-                "size": stat.st_size,
-                "modified": stat.st_mtime * 1000
-            })
-
-    files.sort(key=lambda f: f["modified"], reverse=True)
-    return {"files": files, "session_id": sid}
-
-
-@app.get("/outputs/file/{filename}")
-async def get_output_file(filename: str, session_id: Optional[str] = None):
-    """Get output file content."""
-    sid = session_id or get_current_session_id()
-    if not sid:
-        raise HTTPException(status_code=404, detail="No session")
-
-    file_path = OUTPUTS_DIR / sid / filename
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    return FileResponse(file_path, filename=filename)
-
-
-@app.delete("/outputs/{filename}")
-async def delete_output(filename: str, session_id: Optional[str] = None):
-    """Delete output file."""
-    sid = session_id or get_current_session_id()
-    if not sid:
-        return {"success": False, "error": "No session"}
-
-    file_path = OUTPUTS_DIR / sid / filename
-    if not file_path.exists():
-        return {"success": False, "error": "File not found"}
+async def list_outputs(directory: str = "/outputs"):
+    """List output files from AgentFS filesystem."""
+    global rag
+    if not rag:
+        return {"files": [], "error": "No active session"}
 
     try:
-        file_path.unlink()
-        return {"success": True}
+        files = await rag.fs.readdir(directory)
+        return {
+            "files": files,
+            "directory": directory,
+            "count": len(files),
+            "session_id": current_session_id,
+        }
+    except Exception as e:
+        return {"files": [], "error": str(e)}
+
+
+@app.get("/outputs/file/{filename:path}")
+async def get_output_file(filename: str):
+    """Get output file content from AgentFS filesystem."""
+    global rag
+    if not rag:
+        raise HTTPException(status_code=404, detail="No session")
+
+    try:
+        # Ensure path starts with /
+        filepath = f"/outputs/{filename}" if not filename.startswith("/") else filename
+        content = await rag.fs.read_file(filepath)
+        return {
+            "filename": filename,
+            "content": content,
+            "session_id": current_session_id,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"File not found: {e}")
+
+
+@app.post("/outputs/write")
+async def write_output_file(filename: str, content: str, directory: str = "/outputs"):
+    """Write file to AgentFS filesystem."""
+    global rag
+    if not rag:
+        raise HTTPException(status_code=404, detail="No session")
+
+    try:
+        filepath = f"{directory}/{filename}"
+        await rag.fs.write_file(filepath, content)
+        return {
+            "success": True,
+            "filepath": filepath,
+            "session_id": current_session_id,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/outputs/{filename:path}")
+async def delete_output(filename: str):
+    """Delete file from AgentFS filesystem."""
+    global rag
+    if not rag:
+        return {"success": False, "error": "No session"}
+
+    try:
+        filepath = f"/outputs/{filename}" if not filename.startswith("/") else filename
+        await rag.fs.unlink(filepath)
+        return {"success": True, "deleted": filepath}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@app.get("/fs/tree")
+async def get_filesystem_tree(path: str = "/"):
+    """Get filesystem tree from AgentFS."""
+    global rag
+    if not rag:
+        return {"error": "No active session"}
+
+    try:
+        # Recursively list directories
+        async def list_tree(dir_path: str, depth: int = 0) -> list:
+            if depth > 3:  # Limit depth
+                return []
+            items = []
+            try:
+                entries = await rag.fs.readdir(dir_path)
+                for entry in entries:
+                    full_path = f"{dir_path}/{entry}".replace("//", "/")
+                    item = {"name": entry, "path": full_path}
+                    # Try to list as directory
+                    try:
+                        children = await list_tree(full_path, depth + 1)
+                        if children:
+                            item["children"] = children
+                            item["type"] = "directory"
+                        else:
+                            item["type"] = "file"
+                    except:
+                        item["type"] = "file"
+                    items.append(item)
+            except:
+                pass
+            return items
+
+        tree = await list_tree(path)
+        return {
+            "path": path,
+            "tree": tree,
+            "session_id": current_session_id,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # =============================================================================
