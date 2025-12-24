@@ -23,8 +23,8 @@ import asyncio
 import time
 import uuid
 
-# Claude RAG SDK
-from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions, AgentModel, EmbeddingModel
+# Claude RAG SDK (for RAG endpoints only)
+from claude_rag_sdk import AgentModel, EmbeddingModel
 
 # Core modules from SDK
 from claude_rag_sdk.core.security import get_allowed_origins
@@ -38,73 +38,127 @@ from claude_rag_sdk.core.auth import verify_api_key, is_auth_enabled
 
 AGENTFS_DIR = Path.home() / ".claude" / ".agentfs"
 
-# Global RAG instance
-rag: Optional[ClaudeRAG] = None
+# Global client and AgentFS instances
+client: Optional["ClaudeSDKClient"] = None
+agentfs: Optional["AgentFS"] = None
 current_session_id: Optional[str] = None
 prompt_guard = PromptGuard(strict_mode=False)
 
+# Sessions directory (Claude Code uses cwd-based path)
+# Format: -Users-2a--claude-hello-agent-chat-simples-backend-outputs
+SESSIONS_DIR = Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs"
+
 
 # =============================================================================
-# RAG SESSION MANAGEMENT
+# SESSION MANAGEMENT
 # =============================================================================
 
-async def get_rag() -> ClaudeRAG:
-    """Get or create RAG instance."""
-    global rag, current_session_id
+def extract_session_id_from_jsonl() -> Optional[str]:
+    """Extrai session_id do arquivo JSONL mais recente."""
+    if not SESSIONS_DIR.exists():
+        return None
 
-    if rag is None:
-        # Generate session ID
-        current_session_id = f"chat-{uuid.uuid4().hex[:8]}"
+    jsonl_files = sorted(
+        SESSIONS_DIR.glob("*.jsonl"),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True
+    )
 
-        # Create RAG instance
-        options = ClaudeRAGOptions(
-            id=current_session_id,
-            agent_model=AgentModel.HAIKU,
-            embedding_model=EmbeddingModel.BGE_SMALL,
-            enable_reranking=True,
-            enable_prompt_guard=True,
-            enable_adaptive_topk=True,
-        )
+    if not jsonl_files:
+        return None
 
-        rag = await ClaudeRAG.open(options)
+    latest_jsonl = jsonl_files[0]
+    try:
+        with open(latest_jsonl, 'r') as f:
+            first_line = f.readline().strip()
+            if first_line:
+                data = json.loads(first_line)
+                return data.get("sessionId", latest_jsonl.stem)
+    except:
+        return latest_jsonl.stem
+
+    return None
+
+
+async def get_client() -> "ClaudeSDKClient":
+    """Get ClaudeSDKClient instance (manages sessions automatically)."""
+    global client, agentfs, current_session_id
+
+    if client is None:
+        # Build options using AgentEngine helper
+        from claude_rag_sdk.agent import AgentEngine
+        from claude_rag_sdk import ClaudeRAGOptions
+        from claude_agent_sdk import ClaudeSDKClient
+
+        temp_options = ClaudeRAGOptions(id="temp", agent_model=AgentModel.HAIKU)
+        engine = AgentEngine(options=temp_options, mcp_server_path=None)
+        client_options = engine._get_agent_options()
+
+        # Create ClaudeSDKClient (manages session automatically)
+        client = ClaudeSDKClient(options=client_options)
+        await client.__aenter__()
+
+        # Wait for SDK to write JSONL
+        await asyncio.sleep(0.2)
+
+        # Extract session_id from JSONL
+        current_session_id = extract_session_id_from_jsonl()
+        if not current_session_id:
+            raise RuntimeError("Failed to extract session_id from ClaudeSDKClient")
+
+        # Initialize AgentFS with extracted session_id
+        from agentfs_sdk import AgentFS, AgentFSOptions
+        agentfs = await AgentFS.open(AgentFSOptions(id=current_session_id))
 
         # Store session info in KV
-        await rag.kv.set("session:info", {
+        await agentfs.kv.set("session:info", {
             "id": current_session_id,
             "created_at": time.time(),
         })
 
-        # Write session start log (directories are created automatically)
-        await rag.fs.write_file(
+        # Write session start log
+        await agentfs.fs.write_file(
             f"/logs/session_start.txt",
             f"Session {current_session_id} started at {time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        # Write current session file (for external tools)
+        # Write current session file
         session_file = AGENTFS_DIR / "current_session"
         session_file.parent.mkdir(parents=True, exist_ok=True)
         session_file.write_text(current_session_id)
 
-        print(f"🚀 RAG Session created: {current_session_id}")
+        print(f"🚀 Session created: {current_session_id}")
 
-    return rag
+    return client
 
 
-async def reset_rag() -> ClaudeRAG:
-    """Reset RAG instance (new session)."""
-    global rag, current_session_id
+async def get_agentfs() -> "AgentFS":
+    """Get AgentFS instance."""
+    global agentfs
+    if agentfs is None:
+        await get_client()  # Will initialize both
+    return agentfs
+
+
+async def reset_session():
+    """Reset session (creates new ClaudeSDKClient + AgentFS)."""
+    global client, agentfs, current_session_id
 
     old_session = current_session_id
 
-    if rag is not None:
-        await rag.close()
-        rag = None
-        current_session_id = None
+    if client is not None:
+        await client.__aexit__(None, None, None)
+        client = None
 
-    new_rag = await get_rag()
+    if agentfs is not None:
+        await agentfs.close()
+        agentfs = None
+
+    current_session_id = None
+
+    # Create new session
+    await get_client()
     print(f"🔄 Session reset: {old_session} -> {current_session_id}")
-
-    return new_rag
 
 
 def get_current_session_id() -> Optional[str]:
@@ -132,13 +186,16 @@ def get_current_session_id() -> Optional[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage app lifecycle."""
-    print("🚀 Starting Chat Simples with Claude RAG SDK...")
+    print("🚀 Starting Chat Simples...")
     yield
     # Cleanup
-    global rag
-    if rag is not None:
-        await rag.close()
-        print("👋 RAG session closed!")
+    global client, agentfs
+    if client is not None:
+        await client.__aexit__(None, None, None)
+        print("👋 ClaudeSDKClient closed!")
+    if agentfs is not None:
+        await agentfs.close()
+        print("👋 AgentFS closed!")
 
 
 app = FastAPI(
@@ -190,11 +247,11 @@ class ChatResponse(BaseModel):
 @app.get("/")
 async def root():
     """Health check."""
-    global rag
+    global client, agentfs
     env = os.getenv("ENVIRONMENT", "development")
     response = {
         "status": "ok",
-        "session_active": rag is not None,
+        "session_active": client is not None,
         "session_id": current_session_id,
         "message": "Chat Simples v3 - Claude RAG SDK",
         "auth_enabled": is_auth_enabled()
@@ -209,21 +266,22 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Detailed health check."""
-    global rag
+    global client, agentfs
     env = os.getenv("ENVIRONMENT", "development")
 
-    # Get RAG stats if available
+    # Get session stats if available
     rag_stats = None
-    if rag:
+    if agentfs:
         try:
-            rag_stats = await rag.stats()
+            # Basic stats from AgentFS
+            rag_stats = {"agentfs": "active"}
         except:
             pass
 
     return {
         "status": "healthy",
         "environment": env,
-        "session_active": rag is not None,
+        "session_active": client is not None,
         "session_id": current_session_id,
         "rag_stats": rag_stats,
         "security": {
@@ -255,47 +313,52 @@ async def chat(
         )
 
     try:
-        r = await get_rag()
+        from claude_agent_sdk import AssistantMessage, TextBlock
+
+        c = await get_client()
+        afs = await get_agentfs()
 
         # Track the query
-        call_id = await r.tools.start("chat", {"message": chat_request.message[:100]})
+        call_id = await afs.tools.start("chat", {"message": chat_request.message[:100]})
 
-        # Query with RAG
-        response = await r.query(chat_request.message)
+        # Query with ClaudeSDKClient
+        await c.query(chat_request.message)
+
+        # Collect response
+        response_text = ""
+        async for message in c.receive_response():
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        response_text += block.text
 
         # Complete tracking
-        await r.tools.success(call_id, {
-            "citations": len(response.citations),
-            "confidence": response.confidence,
-        })
+        await afs.tools.success(call_id, {"response_length": len(response_text)})
 
         # Store in conversation history (KV)
-        history = await r.kv.get("conversation:history") or []
+        history = await afs.kv.get("conversation:history") or []
         history.append({
             "role": "user",
             "content": chat_request.message,
         })
         history.append({
             "role": "assistant",
-            "content": response.answer,
-            "citations": response.citations,
+            "content": response_text,
         })
-        await r.kv.set("conversation:history", history[-50:])  # Keep last 50
+        await afs.kv.set("conversation:history", history[-50:])  # Keep last 50
 
         # Save response to filesystem for persistence
         timestamp = time.strftime('%Y%m%d_%H%M%S')
-        await r.fs.write_file(
+        await afs.fs.write_file(
             f"/outputs/chat_{timestamp}.json",
             json.dumps({
                 "timestamp": timestamp,
                 "question": chat_request.message,
-                "answer": response.answer,
-                "citations": response.citations,
-                "confidence": response.confidence,
+                "answer": response_text,
             }, indent=2, ensure_ascii=False)
         )
 
-        return ChatResponse(response=response.answer)
+        return ChatResponse(response=response_text)
 
     except Exception as e:
         print(f"[ERROR] Chat error: {e}")
@@ -363,8 +426,11 @@ async def rag_search(
 ):
     """Search documents using RAG."""
     try:
-        r = await get_rag()
-        results = await r.search(query, top_k=top_k)
+        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+        # Create temporary RAG for search
+        temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=current_session_id or "temp"))
+        results = await temp_rag.search(query, top_k=top_k)
+        await temp_rag.close()
         return {
             "query": query,
             "results": [res.to_dict() for res in results],
@@ -383,8 +449,10 @@ async def rag_ingest(
 ):
     """Add document to RAG."""
     try:
-        r = await get_rag()
-        result = await r.add_text(content, source)
+        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+        temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=current_session_id or "temp"))
+        result = await temp_rag.add_text(content, source)
+        await temp_rag.close()
         return result.to_dict()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -394,8 +462,11 @@ async def rag_ingest(
 async def rag_stats():
     """Get RAG statistics."""
     try:
-        r = await get_rag()
-        return await r.stats()
+        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+        temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=current_session_id or "temp"))
+        stats = await temp_rag.stats()
+        await temp_rag.close()
+        return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -407,7 +478,7 @@ async def rag_stats():
 @app.get("/session/current")
 async def get_current_session():
     """Get current session info."""
-    global rag
+    global agentfs
 
     session_id = get_current_session_id()
 
@@ -421,11 +492,11 @@ async def get_current_session():
     # Get session info from KV
     session_info = None
     output_files = []
-    if rag:
+    if agentfs:
         try:
-            session_info = await rag.kv.get("session:info")
+            session_info = await agentfs.kv.get("session:info")
             # List outputs from AgentFS filesystem
-            output_files = await rag.fs.readdir("/outputs")
+            output_files = await agentfs.fs.readdir("/outputs")
         except:
             pass
 
@@ -441,10 +512,10 @@ async def get_current_session():
 
 @app.post("/reset")
 @limiter.limit("5/minute")
-async def reset_session(request: Request, api_key: str = Depends(verify_api_key)):
+async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key)):
     """Start new session."""
     old_session = current_session_id
-    await reset_rag()
+    await reset_session()
 
     return {
         "status": "ok",
@@ -456,19 +527,19 @@ async def reset_session(request: Request, api_key: str = Depends(verify_api_key)
 
 @app.get("/sessions")
 async def list_sessions():
-    """List all sessions."""
+    """List all sessions (AgentFS + old JSONL sessions)."""
     from agentfs_sdk import AgentFS, AgentFSOptions
     sessions = []
 
-    # Check AgentFS directory for session databases
+    # 1. List AgentFS sessions (new system)
     if AGENTFS_DIR.exists():
-        # Only get main session DBs (not _rag.db)
-        for db_file in sorted(AGENTFS_DIR.glob("chat-*.db"), key=lambda f: f.stat().st_mtime, reverse=True):
+        # Get RAG session DBs (chat-*_rag.db)
+        for db_file in sorted(AGENTFS_DIR.glob("chat-*_rag.db"), key=lambda f: f.stat().st_mtime, reverse=True):
             session_id = db_file.stem
 
-            # Skip _rag databases (those are separate RAG DBs)
+            # Remove _rag suffix from session_id for display
             if session_id.endswith("_rag"):
-                continue
+                session_id = session_id[:-4]  # Remove "_rag"
 
             # Try to get message count from KV
             message_count = 0
@@ -495,6 +566,8 @@ async def list_sessions():
 
             sessions.append({
                 "session_id": session_id,
+                "file": f"chat-simples/{session_id}",  # Path amigável para frontend
+                "file_name": session_id,  # Nome da sessão
                 "db_file": str(db_file),
                 "db_size": db_file.stat().st_size,
                 "updated_at": db_file.stat().st_mtime * 1000,
@@ -502,14 +575,46 @@ async def list_sessions():
                 "message_count": message_count,
                 "has_outputs": output_count > 0,
                 "output_count": output_count,
+                "model": "claude-3-5-haiku",  # Modelo padrão usado
             })
+
+    # 2. List JSONL sessions (Claude Code standard location)
+    # Use SESSIONS_DIR which points to correct location
+    if SESSIONS_DIR.exists():
+        for jsonl_file in sorted(SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True):
+            session_id = jsonl_file.stem
+
+            # Count messages in JSONL
+            message_count = 0
+            try:
+                with open(jsonl_file, 'r') as f:
+                    message_count = len(f.readlines())
+            except:
+                pass
+
+            sessions.append({
+                "session_id": session_id,
+                "file": f"backend/{jsonl_file.name}",
+                "file_name": jsonl_file.name,
+                "db_file": str(jsonl_file),
+                "db_size": jsonl_file.stat().st_size,
+                "updated_at": jsonl_file.stat().st_mtime * 1000,
+                "is_current": False,
+                "message_count": message_count,
+                "has_outputs": False,  # Legacy sessions don't track this
+                "output_count": 0,
+                "model": "claude-3-5-haiku (legacy)",
+            })
+
+    # Sort all sessions by update time
+    sessions.sort(key=lambda s: s['updated_at'], reverse=True)
 
     return {"count": len(sessions), "sessions": sessions}
 
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a session (deletes AgentFS database which includes fs, kv, tools)."""
+    """Delete a session (AgentFS or legacy JSONL)."""
     # Don't delete current session
     if session_id == current_session_id:
         return {"success": False, "error": "Cannot delete active session"}
@@ -529,6 +634,20 @@ async def delete_session(session_id: str):
         audit_file.unlink()
         deleted.append(str(audit_file))
 
+    # Delete legacy JSONL session if exists
+    old_sessions_dir = Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend"
+    jsonl_file = old_sessions_dir / f"{session_id}.jsonl"
+    if jsonl_file.exists():
+        jsonl_file.unlink()
+        deleted.append(str(jsonl_file))
+
+    # Delete outputs folder for this session
+    import shutil
+    outputs_dir = Path.cwd() / "outputs" / session_id
+    if outputs_dir.exists() and outputs_dir.is_dir():
+        shutil.rmtree(outputs_dir)
+        deleted.append(str(outputs_dir))
+
     return {"success": True, "deleted": deleted}
 
 
@@ -537,35 +656,48 @@ async def delete_session(session_id: str):
 # =============================================================================
 
 @app.get("/outputs")
-async def list_outputs(directory: str = "/outputs"):
-    """List output files from AgentFS filesystem."""
-    global rag
-    if not rag:
-        return {"files": [], "error": "No active session"}
-
+async def list_outputs(directory: str = "outputs", session_id: str = None):
+    """List output files from physical filesystem."""
     try:
-        files = await rag.fs.readdir(directory)
+        # If session_id is provided, append it to the directory path
+        if session_id:
+            outputs_dir = Path.cwd() / directory / session_id
+        else:
+            outputs_dir = Path.cwd() / directory
+
+        if not outputs_dir.exists():
+            return {"files": [], "directory": str(outputs_dir), "count": 0, "session_id": session_id}
+
+        files = []
+        for file in outputs_dir.iterdir():
+            if file.is_file():
+                stat = file.stat()
+                files.append({
+                    "name": file.name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime * 1000
+                })
+
+        files.sort(key=lambda f: f["modified"], reverse=True)
         return {
             "files": files,
-            "directory": directory,
+            "directory": str(outputs_dir),
             "count": len(files),
-            "session_id": current_session_id,
+            "session_id": session_id,
         }
     except Exception as e:
-        return {"files": [], "error": str(e)}
+        return {"files": [], "error": str(e), "session_id": session_id}
 
 
 @app.get("/outputs/file/{filename:path}")
 async def get_output_file(filename: str):
     """Get output file content from AgentFS filesystem."""
-    global rag
-    if not rag:
-        raise HTTPException(status_code=404, detail="No session")
+    afs = await get_agentfs()
 
     try:
         # Ensure path starts with /
         filepath = f"/outputs/{filename}" if not filename.startswith("/") else filename
-        content = await rag.fs.read_file(filepath)
+        content = await afs.fs.read_file(filepath)
         return {
             "filename": filename,
             "content": content,
@@ -578,13 +710,11 @@ async def get_output_file(filename: str):
 @app.post("/outputs/write")
 async def write_output_file(filename: str, content: str, directory: str = "/outputs"):
     """Write file to AgentFS filesystem."""
-    global rag
-    if not rag:
-        raise HTTPException(status_code=404, detail="No session")
+    afs = await get_agentfs()
 
     try:
         filepath = f"{directory}/{filename}"
-        await rag.fs.write_file(filepath, content)
+        await afs.fs.write_file(filepath, content)
         return {
             "success": True,
             "filepath": filepath,
@@ -597,24 +727,76 @@ async def write_output_file(filename: str, content: str, directory: str = "/outp
 @app.delete("/outputs/{filename:path}")
 async def delete_output(filename: str):
     """Delete file from AgentFS filesystem."""
-    global rag
-    if not rag:
-        return {"success": False, "error": "No session"}
-
     try:
+        afs = await get_agentfs()
         filepath = f"/outputs/{filename}" if not filename.startswith("/") else filename
-        await rag.fs.unlink(filepath)
+        await afs.fs.unlink(filepath)
         return {"success": True, "deleted": filepath}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
+@app.get("/sessions/{session_id}")
+async def get_session_details(session_id: str):
+    """Get session details with messages."""
+    messages_data = await get_session_messages(session_id)
+    return messages_data
+
+
+@app.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """Get messages from a session (supports both AgentFS and legacy JSONL)."""
+    import json
+
+    # Try JSONL first (legacy sessions - check multiple locations)
+    old_sessions_dirs = [
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+    ]
+
+    jsonl_file = None
+    for old_dir in old_sessions_dirs:
+        candidate = old_dir / f"{session_id}.jsonl"
+        if candidate.exists():
+            jsonl_file = candidate
+            break
+
+    if jsonl_file:
+        messages = []
+        try:
+            with open(jsonl_file, 'r') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                        if entry.get('type') in ['user', 'assistant']:
+                            msg = entry.get('message', {})
+                            messages.append({
+                                'role': msg.get('role'),
+                                'content': msg.get('content'),
+                                'timestamp': entry.get('timestamp'),
+                            })
+                    except:
+                        continue
+            return {"messages": messages, "count": len(messages), "type": "jsonl"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Try AgentFS KV (new system)
+    global agentfs
+    if agentfs and current_session_id == session_id:
+        try:
+            history = await agentfs.kv.get("conversation:history") or []
+            return {"messages": history, "count": len(history), "type": "agentfs"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    raise HTTPException(status_code=404, detail="Session not found")
+
+
 @app.get("/fs/tree")
 async def get_filesystem_tree(path: str = "/"):
     """Get filesystem tree from AgentFS."""
-    global rag
-    if not rag:
-        return {"error": "No active session"}
+    afs = await get_agentfs()
 
     try:
         # Recursively list directories
@@ -623,7 +805,7 @@ async def get_filesystem_tree(path: str = "/"):
                 return []
             items = []
             try:
-                entries = await rag.fs.readdir(dir_path)
+                entries = await afs.fs.readdir(dir_path)
                 for entry in entries:
                     full_path = f"{dir_path}/{entry}".replace("//", "/")
                     item = {"name": entry, "path": full_path}
@@ -664,10 +846,11 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
         return {"error": "No active session", "records": []}
 
     # Get from AgentFS tools
-    if rag:
+    afs = await get_agentfs()
+    if afs:
         try:
-            stats = await rag.tools.get_stats()
-            recent = await rag.tools.get_recent(limit=limit)
+            stats = await afs.tools.get_stats()
+            recent = await afs.tools.get_recent(limit=limit)
             return {
                 "session_id": sid,
                 "stats": [{"name": s.name, "calls": s.total_calls, "avg_ms": s.avg_duration_ms} for s in stats],
@@ -687,9 +870,10 @@ async def get_audit_stats(session_id: Optional[str] = None):
     if not sid:
         return {"error": "No active session"}
 
-    if rag:
+    afs = await get_agentfs()
+    if afs:
         try:
-            stats = await rag.tools.get_stats()
+            stats = await afs.tools.get_stats()
             return {
                 "session_id": sid,
                 "total_calls": sum(s.total_calls for s in stats),
@@ -709,11 +893,10 @@ async def get_audit_stats(session_id: Optional[str] = None):
 @app.get("/kv/list")
 async def list_kv(prefix: str = ""):
     """List KV store keys."""
-    if not rag:
-        return {"keys": [], "error": "No session"}
+    afs = await get_agentfs()
 
     try:
-        keys = await rag.kv.list(prefix=prefix if prefix else None)
+        keys = await afs.kv.list(prefix=prefix if prefix else None)
         return {"keys": keys, "count": len(keys)}
     except Exception as e:
         return {"keys": [], "error": str(e)}
@@ -722,11 +905,10 @@ async def list_kv(prefix: str = ""):
 @app.get("/kv/{key}")
 async def get_kv(key: str):
     """Get KV value."""
-    if not rag:
-        raise HTTPException(status_code=404, detail="No session")
+    afs = await get_agentfs()
 
     try:
-        value = await rag.kv.get(key)
+        value = await afs.kv.get(key)
         if value is None:
             raise HTTPException(status_code=404, detail="Key not found")
         return {"key": key, "value": value}
