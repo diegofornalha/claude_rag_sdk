@@ -1,18 +1,5 @@
-# Claude Agent SDK - SDK oficial para criar agentes com Claude
-claude-agent-sdk
+# Claude RAG SDK (local package - installs all dependencies)
+-e .
 
-# FastAPI e servidor
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-pydantic>=2.0.0
-
-# MCP Server
-fastmcp>=0.1.0
-
-# Seguranca (Semana 1)
-slowapi>=0.1.9            # Rate limiting
-python-dotenv>=1.0.0      # Carregar .env
-
-# AgentFS SDK - Filesystem para agentes com auditoria
-agentfs-sdk>=0.4.0
-pyturso>=0.4.0
+# Additional server dependencies (if not in pyproject.toml)
+slowapi>=0.1.9

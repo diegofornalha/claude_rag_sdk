@@ -1,3 +1,15 @@
+"""
+Chat Simples Server - Powered by Claude RAG SDK
+
+Production-ready FastAPI server with:
+- Claude RAG SDK integration
+- Session management via AgentFS
+- Rate limiting, CORS, authentication
+- Prompt injection protection
+- Streaming responses
+- Audit trail
+"""
+
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,161 +19,149 @@ from pathlib import Path
 from typing import Optional
 import json
 import os
-import sys
-import importlib.util
 import asyncio
-import shutil
 
-from claude_agent_sdk import ClaudeSDKClient, AssistantMessage, TextBlock, ProcessError
+# Claude RAG SDK
+from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions, AgentModel, EmbeddingModel
 
-# Importa config do RAG Agent
-rag_config_path = Path(__file__).parent / "rag-agent" / "config.py"
-spec = importlib.util.spec_from_file_location("rag_config", rag_config_path)
-rag_config = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(rag_config)
-RAG_AGENT_OPTIONS = rag_config.RAG_AGENT_OPTIONS
+# Core modules from SDK
+from claude_rag_sdk.core.security import get_allowed_origins
+from claude_rag_sdk.core.rate_limiter import get_limiter, RATE_LIMITS, SLOWAPI_AVAILABLE
+from claude_rag_sdk.core.prompt_guard import PromptGuard
+from claude_rag_sdk.core.auth import verify_api_key, is_auth_enabled
 
-# Importa modulos de seguranca
-sys.path.insert(0, str(Path(__file__).parent))
-from core.security import get_allowed_origins, get_allowed_methods, get_allowed_headers, SECURITY_CONFIG
-from core.rate_limiter import get_limiter, RATE_LIMITS, get_client_ip, SLOWAPI_AVAILABLE
-from core.prompt_guard import validate_prompt
-from core.auth import verify_api_key, is_auth_enabled
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
 
-# Importa funções de logger do RAG agent para session tracking
-rag_logger_path = Path(__file__).parent / "rag-agent" / "core" / "logger.py"
-spec_logger = importlib.util.spec_from_file_location("rag_logger", rag_logger_path)
-rag_logger = importlib.util.module_from_spec(spec_logger)
-spec_logger.loader.exec_module(rag_logger)
-set_session_id = rag_logger.set_session_id
-get_session_id = rag_logger.get_session_id
+OUTPUTS_DIR = Path(__file__).parent / "outputs"
+AUDIT_DIR = Path.home() / ".claude" / ".agentfs" / "audit"
+SESSIONS_DIR = Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend"
 
-SESSIONS_DIR = Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-rag-agent"
-RAG_OUTPUTS_DIR = Path(__file__).parent / "rag-agent" / "outputs"
-
-client: ClaudeSDKClient | None = None
+# Global RAG instance
+rag: Optional[ClaudeRAG] = None
+current_session_id: Optional[str] = None
+prompt_guard = PromptGuard(strict_mode=False)
 
 
-def extract_session_id_from_jsonl() -> str:
-    """Extrai session_id do arquivo JSONL mais recente."""
-    if not SESSIONS_DIR.exists():
-        return "default"
+# =============================================================================
+# RAG SESSION MANAGEMENT
+# =============================================================================
 
-    # Pegar JSONL mais recente (por mtime)
-    jsonl_files = sorted(
-        SESSIONS_DIR.glob("*.jsonl"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True
-    )
+async def get_rag() -> ClaudeRAG:
+    """Get or create RAG instance."""
+    global rag, current_session_id
 
-    if not jsonl_files:
-        return "default"
+    if rag is None:
+        # Generate session ID
+        import uuid
+        current_session_id = f"chat-{uuid.uuid4().hex[:8]}"
 
-    latest_jsonl = jsonl_files[0]
+        # Create RAG instance
+        options = ClaudeRAGOptions(
+            id=current_session_id,
+            agent_model=AgentModel.HAIKU,
+            embedding_model=EmbeddingModel.BGE_SMALL,
+            enable_reranking=True,
+            enable_prompt_guard=True,
+            enable_adaptive_topk=True,
+        )
 
-    # Ler primeira linha para extrair sessionId
-    try:
-        with open(latest_jsonl, 'r') as f:
-            first_line = f.readline().strip()
-            if first_line:
-                data = json.loads(first_line)
-                session_id = data.get("sessionId", latest_jsonl.stem)
-                return session_id
-    except Exception as e:
-        print(f"[WARN] Não foi possível extrair sessionId: {e}")
-        return latest_jsonl.stem  # Fallback: usar nome do arquivo
+        rag = await ClaudeRAG.open(options)
 
-    return "default"
+        # Create session output directory
+        session_output_dir = OUTPUTS_DIR / current_session_id
+        session_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Store session info
+        await rag.kv.set("session:info", {
+            "id": current_session_id,
+            "created_at": asyncio.get_event_loop().time(),
+        })
+
+        # Write current session file
+        session_file = Path.home() / ".claude" / ".agentfs" / "current_session"
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        session_file.write_text(current_session_id)
+
+        print(f"🚀 RAG Session created: {current_session_id}")
+
+    return rag
 
 
-async def get_client() -> ClaudeSDKClient:
-    """Retorna o cliente, criando se necessário."""
-    global client
-    if client is None:
-        # Criar cliente único (evita mismatch de session_id)
-        client = ClaudeSDKClient(options=RAG_AGENT_OPTIONS)
+async def reset_rag() -> ClaudeRAG:
+    """Reset RAG instance (new session)."""
+    global rag, current_session_id
+
+    old_session = current_session_id
+
+    if rag is not None:
+        await rag.close()
+        rag = None
+        current_session_id = None
+
+    new_rag = await get_rag()
+    print(f"🔄 Session reset: {old_session} -> {current_session_id}")
+
+    return new_rag
+
+
+def get_current_session_id() -> Optional[str]:
+    """Get current session ID."""
+    global current_session_id
+
+    if current_session_id:
+        return current_session_id
+
+    # Try to read from file
+    session_file = Path.home() / ".claude" / ".agentfs" / "current_session"
+    if session_file.exists():
         try:
-            await client.__aenter__()
-            print("🔗 Nova sessão criada!")
+            return session_file.read_text().strip()
+        except:
+            pass
 
-            # Aguardar SDK escrever primeira linha do JSONL
-            await asyncio.sleep(0.2)
+    return None
 
-            # Extrair session_id do cliente ativo
-            session_id = extract_session_id_from_jsonl()
-            set_session_id(session_id)
-            print(f"📁 Session ID: {session_id}")
 
-            # Criar pasta da sessão para outputs
-            session_output_dir = RAG_OUTPUTS_DIR / session_id
-            session_output_dir.mkdir(parents=True, exist_ok=True)
-            print(f"📂 Pasta da sessão criada: {session_output_dir}")
-
-            # Inicializar AgentFS para a sessão
-            from core.agentfs_manager import init_agentfs
-            await init_agentfs(session_id)
-            print(f"🗄️  AgentFS inicializado: ~/.claude/.agentfs/{session_id}.db")
-
-            # Definir variável de ambiente para MCP server usar auditoria
-            os.environ["AGENTFS_SESSION_ID"] = session_id
-
-            # Escrever session_id em arquivo compartilhado para subprocessos
-            session_file = Path.home() / ".claude" / ".agentfs" / "current_session"
-            session_file.write_text(session_id)
-
-        except Exception as e:
-            # Cleanup em caso de erro durante inicialização
-            try:
-                await client.__aexit__(None, None, None)
-            except Exception:
-                pass
-            client = None
-            raise e
-
-    return client
-
-async def reset_client():
-    """Reseta o cliente (nova sessão)."""
-    global client
-    if client is not None:
-        await client.__aexit__(None, None, None)
-        client = None
-    return await get_client()
-
+# =============================================================================
+# FASTAPI APP
+# =============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Gerencia ciclo de vida do app."""
-    print("🚀 Iniciando Chat Simples...")
+    """Manage app lifecycle."""
+    print("🚀 Starting Chat Simples with Claude RAG SDK...")
     yield
-    # Cleanup ao desligar
-    global client
-    if client is not None:
-        await client.__aexit__(None, None, None)
-        print("👋 Sessão encerrada!")
+    # Cleanup
+    global rag
+    if rag is not None:
+        await rag.close()
+        print("👋 RAG session closed!")
 
-    # Fechar AgentFS
-    from core.agentfs_manager import close_agentfs
-    await close_agentfs()
-    print("🗄️  AgentFS fechado")
 
 app = FastAPI(
     title="Chat Simples",
-    description="Backend com sessão persistente - Claude Agent SDK",
-    version="2.0.0",
+    description="Chat backend powered by Claude RAG SDK",
+    version="3.0.0",
     lifespan=lifespan
 )
 
-# CORS - permitir localhost em dev
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8001", "http://127.0.0.1:3000", "http://127.0.0.1:8001"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Rate limiter (Debito #2)
+# Rate limiter
 limiter = get_limiter()
 if SLOWAPI_AVAILABLE:
     from slowapi import _rate_limit_exceeded_handler
@@ -170,407 +170,354 @@ if SLOWAPI_AVAILABLE:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
+# =============================================================================
+# MODELS
+# =============================================================================
+
 class ChatRequest(BaseModel):
     message: str
+
 
 class ChatResponse(BaseModel):
     response: str
 
+
+# =============================================================================
+# HEALTH ENDPOINTS
+# =============================================================================
+
 @app.get("/")
 async def root():
     """Health check."""
-    global client
+    global rag
     env = os.getenv("ENVIRONMENT", "development")
     response = {
         "status": "ok",
-        "session_active": client is not None,
-        "message": "Chat Simples v2 - Sessão Persistente",
+        "session_active": rag is not None,
+        "session_id": current_session_id,
+        "message": "Chat Simples v3 - Claude RAG SDK",
         "auth_enabled": is_auth_enabled()
     }
-    # Em dev, expor a API key
     if env != "production" and is_auth_enabled():
-        from core.auth import VALID_API_KEYS
+        from claude_rag_sdk.core.auth import VALID_API_KEYS
         if VALID_API_KEYS:
             response["dev_key"] = list(VALID_API_KEYS)[0]
     return response
 
+
 @app.get("/health")
 async def health_check():
-    """Health check detalhado com status de segurança."""
-    global client
+    """Detailed health check."""
+    global rag
     env = os.getenv("ENVIRONMENT", "development")
+
+    # Get RAG stats if available
+    rag_stats = None
+    if rag:
+        try:
+            rag_stats = await rag.stats()
+        except:
+            pass
+
     return {
         "status": "healthy",
         "environment": env,
-        "session_active": client is not None,
+        "session_active": rag is not None,
+        "session_id": current_session_id,
+        "rag_stats": rag_stats,
         "security": {
             "auth_enabled": is_auth_enabled(),
-            "cors_origins": len(get_allowed_origins()),
             "rate_limiter": "slowapi" if SLOWAPI_AVAILABLE else "simple",
             "prompt_guard": "active"
         }
     }
 
 
-def _get_current_session_id() -> str:
-    """Obtém session_id do arquivo compartilhado com fallback."""
-    session_file = Path.home() / ".claude" / ".agentfs" / "current_session"
-    if session_file.exists():
-        try:
-            session_id = session_file.read_text().strip()
-            if session_id:
-                return session_id
-        except:
-            pass
-    return get_session_id()  # Fallback para logger
+# =============================================================================
+# CHAT ENDPOINTS
+# =============================================================================
 
+@app.post("/chat", response_model=ChatResponse)
+@limiter.limit(RATE_LIMITS.get("chat", "30/minute"))
+async def chat(
+    request: Request,
+    chat_request: ChatRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """Chat with RAG-powered AI."""
+    # Validate prompt
+    scan_result = prompt_guard.scan(chat_request.message)
+    if not scan_result.is_safe:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message blocked: {scan_result.threat_level.value}"
+        )
+
+    try:
+        r = await get_rag()
+
+        # Track the query
+        call_id = await r.tools.start("chat", {"message": chat_request.message[:100]})
+
+        # Query with RAG
+        response = await r.query(chat_request.message)
+
+        # Complete tracking
+        await r.tools.success(call_id, {
+            "citations": len(response.citations),
+            "confidence": response.confidence,
+        })
+
+        # Store in conversation history
+        history = await r.kv.get("conversation:history") or []
+        history.append({
+            "role": "user",
+            "content": chat_request.message,
+        })
+        history.append({
+            "role": "assistant",
+            "content": response.answer,
+            "citations": response.citations,
+        })
+        await r.kv.set("conversation:history", history[-50:])  # Keep last 50
+
+        return ChatResponse(response=response.answer)
+
+    except Exception as e:
+        print(f"[ERROR] Chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chat/stream")
+@limiter.limit(RATE_LIMITS.get("chat_stream", "20/minute"))
+async def chat_stream(
+    request: Request,
+    chat_request: ChatRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """Chat with streaming response."""
+    # Validate prompt
+    scan_result = prompt_guard.scan(chat_request.message)
+    if not scan_result.is_safe:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message blocked: {scan_result.threat_level.value}"
+        )
+
+    try:
+        r = await get_rag()
+
+        async def generate():
+            try:
+                # For now, get full response and stream it
+                # TODO: Implement true streaming with AgentEngine
+                response = await r.query(chat_request.message)
+
+                # Stream the response in chunks
+                text = response.answer
+                chunk_size = 50
+                for i in range(0, len(text), chunk_size):
+                    chunk = text[i:i+chunk_size]
+                    yield f"data: {json.dumps({'text': chunk})}\n\n"
+                    await asyncio.sleep(0.01)
+
+                # Send citations at the end
+                if response.citations:
+                    yield f"data: {json.dumps({'citations': response.citations})}\n\n"
+
+                yield "data: [DONE]\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
+
+    except Exception as e:
+        print(f"[ERROR] Stream error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# RAG ENDPOINTS
+# =============================================================================
+
+@app.post("/rag/search")
+async def rag_search(
+    request: Request,
+    query: str,
+    top_k: int = 5,
+    api_key: str = Depends(verify_api_key)
+):
+    """Search documents using RAG."""
+    try:
+        r = await get_rag()
+        results = await r.search(query, top_k=top_k)
+        return {
+            "query": query,
+            "results": [res.to_dict() for res in results],
+            "count": len(results),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/ingest")
+async def rag_ingest(
+    request: Request,
+    content: str,
+    source: str,
+    api_key: str = Depends(verify_api_key)
+):
+    """Add document to RAG."""
+    try:
+        r = await get_rag()
+        result = await r.add_text(content, source)
+        return result.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/rag/stats")
+async def rag_stats():
+    """Get RAG statistics."""
+    try:
+        r = await get_rag()
+        return await r.stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# SESSION ENDPOINTS
+# =============================================================================
 
 @app.get("/session/current")
 async def get_current_session():
-    """Retorna informações da sessão atual."""
-    global client
+    """Get current session info."""
+    global rag
 
-    # Usar a mesma lógica de _get_current_session_id() com fallback
-    session_id = _get_current_session_id()
+    session_id = get_current_session_id()
 
-    # Se não houver sessão válida, retornar inativo
-    if not session_id or session_id == "default":
+    if not session_id:
         return {
             "active": False,
             "session_id": None,
-            "message": "Nenhuma sessão ativa"
+            "message": "No active session"
         }
-    session_file = SESSIONS_DIR / f"{session_id}.jsonl"
 
-    # Contar mensagens
-    message_count = 0
-    if session_file.exists():
-        message_count = len(session_file.read_text().strip().split('\n'))
+    # Get session info from KV
+    session_info = None
+    if rag:
+        try:
+            session_info = await rag.kv.get("session:info")
+        except:
+            pass
 
-    # Verificar outputs no rag-agent
-    session_output_dir = RAG_OUTPUTS_DIR / session_id
+    # Check outputs
+    session_output_dir = OUTPUTS_DIR / session_id
     has_outputs = session_output_dir.exists()
     output_count = len(list(session_output_dir.iterdir())) if has_outputs else 0
 
     return {
         "active": True,
         "session_id": session_id,
-        "message_count": message_count,
+        "info": session_info,
         "has_outputs": has_outputs,
         "output_count": output_count,
-        "output_dir": str(session_output_dir) if has_outputs else None
     }
 
-
-@app.post("/chat", response_model=ChatResponse)
-@limiter.limit(RATE_LIMITS["chat"])
-async def chat(
-    request: Request,
-    chat_request: ChatRequest,
-    api_key: str = Depends(verify_api_key)
-):
-    """Chat com sessão persistente."""
-    # Validacao anti-injection (Debito #3)
-    validation = validate_prompt(chat_request.message)
-    if not validation.is_safe:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mensagem bloqueada: {validation.message}"
-        )
-
-    try:
-        c = await get_client()
-
-        # Envia mensagem
-        await c.query(chat_request.message)
-
-        # Coleta resposta
-        response_text = ""
-        async for message in c.receive_response():
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text += block.text
-
-        return ChatResponse(response=response_text)
-
-    except ProcessError as e:
-        raise HTTPException(status_code=503, detail=f"Erro ao processar com Claude: {str(e)}")
-    except Exception as e:
-        print(f"[ERROR] Chat error: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor")
-
-@app.post("/chat/stream")
-@limiter.limit(RATE_LIMITS["chat_stream"])
-async def chat_stream(
-    request: Request,
-    chat_request: ChatRequest,
-    api_key: str = Depends(verify_api_key)
-):
-    """Chat com streaming e sessão persistente."""
-    # Validacao anti-injection (Debito #3)
-    validation = validate_prompt(chat_request.message)
-    if not validation.is_safe:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mensagem bloqueada: {validation.message}"
-        )
-
-    try:
-        c = await get_client()
-
-        async def generate():
-            await c.query(chat_request.message)
-            async for message in c.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            yield f"data: {block.text}\n\n"
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
-
-    except ProcessError as e:
-        raise HTTPException(status_code=503, detail=f"Erro ao processar com Claude: {str(e)}")
-    except Exception as e:
-        print(f"[ERROR] Stream error: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor")
 
 @app.post("/reset")
 @limiter.limit("5/minute")
 async def reset_session(request: Request, api_key: str = Depends(verify_api_key)):
-    """Inicia nova sessão (novo JSONL)."""
-    old_session_id = get_session_id()
-    await reset_client()
-
-    # Limpar arquivo de sessão atual (AgentFS)
-    session_file_path = Path.home() / ".claude" / ".agentfs" / "current_session"
-    if session_file_path.exists():
-        try:
-            session_file_path.unlink()
-        except Exception:
-            pass
-
-    # Aguardar nova sessão ser criada
-    await asyncio.sleep(0.1)
-    new_session_id = extract_session_id_from_jsonl()
-    set_session_id(new_session_id)
+    """Start new session."""
+    old_session = current_session_id
+    await reset_rag()
 
     return {
         "status": "ok",
-        "message": "Nova sessão iniciada!",
-        "old_session_id": old_session_id,
-        "new_session_id": new_session_id
+        "message": "New session started!",
+        "old_session_id": old_session,
+        "new_session_id": current_session_id
     }
 
 
 @app.get("/sessions")
 async def list_sessions():
-    """Lista todas as sessões disponíveis."""
+    """List all sessions."""
     sessions = []
 
-    if not SESSIONS_DIR.exists():
-        return {"count": 0, "sessions": []}
+    # Check AgentFS directory
+    agentfs_dir = Path.home() / ".claude" / ".agentfs"
+    if agentfs_dir.exists():
+        for db_file in sorted(agentfs_dir.glob("chat-*.db"), key=lambda f: f.stat().st_mtime, reverse=True):
+            session_id = db_file.stem
 
-    for file in sorted(SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True):
-        try:
-            lines = file.read_text().strip().split('\n')
-            message_count = len(lines)
-
-            # Usar nome do arquivo como session_id único
-            session_id = file.stem
-
-            # Tentar extrair modelo da primeira mensagem
-            model = "unknown"
-            for line in lines[:5]:
-                try:
-                    data = json.loads(line)
-                    if "message" in data and "model" in data.get("message", {}):
-                        model = data["message"]["model"]
-                        break
-                except:
-                    pass
-
-            # Verificar se há outputs para esta sessão
-            session_output_dir = RAG_OUTPUTS_DIR / session_id
+            # Check for outputs
+            session_output_dir = OUTPUTS_DIR / session_id
             has_outputs = session_output_dir.exists()
             output_count = len(list(session_output_dir.iterdir())) if has_outputs else 0
 
             sessions.append({
                 "session_id": session_id,
-                "file_name": file.name,
-                "file": str(file),
-                "message_count": message_count,
-                "model": model,
-                "updated_at": file.stat().st_mtime * 1000,
+                "db_file": str(db_file),
+                "db_size": db_file.stat().st_size,
+                "updated_at": db_file.stat().st_mtime * 1000,
                 "has_outputs": has_outputs,
-                "output_count": output_count
+                "output_count": output_count,
+                "is_current": session_id == current_session_id,
             })
-        except Exception as e:
-            print(f"Erro ao ler {file}: {e}")
 
     return {"count": len(sessions), "sessions": sessions}
 
-@app.get("/sessions/{session_id}")
-async def get_session(session_id: str):
-    """Retorna mensagens de uma sessão."""
-    file_path = SESSIONS_DIR / f"{session_id}.jsonl"
-
-    if not file_path.exists():
-        return {"error": "Sessão não encontrada"}
-
-    messages = []
-    for line in file_path.read_text().strip().split('\n'):
-        try:
-            messages.append(json.loads(line))
-        except:
-            pass
-
-    return {"count": len(messages), "messages": messages}
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Deleta uma sessão e sua pasta de outputs."""
+    """Delete a session."""
     import shutil
 
-    file_path = SESSIONS_DIR / f"{session_id}.jsonl"
+    # Don't delete current session
+    if session_id == current_session_id:
+        return {"success": False, "error": "Cannot delete active session"}
 
-    if not file_path.exists():
-        return {"success": False, "error": "Sessão não encontrada"}
+    deleted = []
 
-    try:
-        # Deletar arquivo da sessão
-        file_path.unlink()
+    # Delete AgentFS database
+    agentfs_dir = Path.home() / ".claude" / ".agentfs"
+    for pattern in [f"{session_id}.db", f"{session_id}.db-wal", f"{session_id}.db-shm", f"{session_id}_rag.db"]:
+        f = agentfs_dir / pattern
+        if f.exists():
+            f.unlink()
+            deleted.append(str(f))
 
-        # Deletar pasta de outputs da sessão (se existir)
-        outputs_dir = RAG_OUTPUTS_DIR / session_id
-        if outputs_dir.exists() and outputs_dir.is_dir():
-            shutil.rmtree(outputs_dir)
-            print(f"🗑️ Pasta de outputs removida: {outputs_dir}")
+    # Delete audit file
+    audit_file = AUDIT_DIR / f"{session_id}.jsonl"
+    if audit_file.exists():
+        audit_file.unlink()
+        deleted.append(str(audit_file))
 
-        # Deletar arquivos do AgentFS da sessão (se existirem)
-        agentfs_dir = Path.home() / ".claude" / ".agentfs"
-        agentfs_files = [
-            agentfs_dir / f"{session_id}.db",
-            agentfs_dir / f"{session_id}.db-wal",
-            agentfs_dir / f"{session_id}.db-shm",
-            agentfs_dir / "audit" / f"{session_id}.jsonl"
-        ]
-        for f in agentfs_files:
-            if f.exists():
-                f.unlink()
-                print(f"🗑️ AgentFS removido: {f.name}")
+    # Delete outputs
+    outputs_dir = OUTPUTS_DIR / session_id
+    if outputs_dir.exists():
+        shutil.rmtree(outputs_dir)
+        deleted.append(str(outputs_dir))
 
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    return {"success": True, "deleted": deleted}
 
 
-@app.get("/rag-outputs/{session_id}")
-async def list_rag_outputs_by_session(session_id: str):
-    """Lista arquivos de uma sessão específica do RAG agent."""
-    session_dir = RAG_OUTPUTS_DIR / session_id
-
-    if not session_dir.exists():
-        return {"session_id": session_id, "files": [], "count": 0}
-
-    files = []
-    for file in session_dir.iterdir():
-        if file.is_file():
-            stat = file.stat()
-            files.append({
-                "name": file.name,
-                "path": str(file.relative_to(RAG_OUTPUTS_DIR)),
-                "size": stat.st_size,
-                "modified": stat.st_mtime * 1000
-            })
-
-    files.sort(key=lambda f: f["modified"], reverse=True)
-    return {"session_id": session_id, "files": files, "count": len(files)}
-
-
-@app.get("/sessions/{session_id}/rag-outputs")
-async def get_session_rag_outputs_detailed(session_id: str):
-    """Retorna informação detalhada dos outputs RAG de uma sessão."""
-    session_dir = RAG_OUTPUTS_DIR / session_id
-
-    if not session_dir.exists():
-        return {
-            "session_id": session_id,
-            "exists": False,
-            "files": [],
-            "total_size": 0,
-            "count": 0
-        }
-
-    files = []
-    total_size = 0
-
-    for file in session_dir.iterdir():
-        if file.is_file():
-            stat = file.stat()
-            total_size += stat.st_size
-
-            # Ler primeiras linhas para preview
-            preview = ""
-            try:
-                with open(file, 'r', encoding='utf-8') as f:
-                    preview = f.read(200)
-            except:
-                preview = "[binary file]"
-
-            files.append({
-                "name": file.name,
-                "path": str(file.relative_to(RAG_OUTPUTS_DIR)),
-                "size": stat.st_size,
-                "modified": stat.st_mtime * 1000,
-                "preview": preview
-            })
-
-    files.sort(key=lambda f: f["modified"], reverse=True)
-
-    return {
-        "session_id": session_id,
-        "exists": True,
-        "files": files,
-        "total_size": total_size,
-        "count": len(files)
-    }
-
-
-@app.delete("/sessions/{session_id}/rag-outputs")
-async def delete_session_rag_outputs(session_id: str):
-    """Deleta todos os outputs RAG de uma sessão."""
-    session_dir = RAG_OUTPUTS_DIR / session_id
-
-    if not session_dir.exists():
-        return {"success": False, "error": "Sessão não encontrada"}
-
-    try:
-        shutil.rmtree(session_dir)
-        return {"success": True, "message": f"Outputs da sessão {session_id} deletados"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def _get_session_outputs_dir(session_id: Optional[str] = None) -> Path:
-    """Retorna diretório de outputs da sessão."""
-    if session_id:
-        return RAG_OUTPUTS_DIR / session_id
-
-    session_file = Path.home() / ".claude" / ".agentfs" / "current_session"
-    if session_file.exists():
-        current_session = session_file.read_text().strip()
-        return RAG_OUTPUTS_DIR / current_session
-    return RAG_OUTPUTS_DIR
+# =============================================================================
+# OUTPUT ENDPOINTS
+# =============================================================================
 
 @app.get("/outputs")
 async def list_outputs(session_id: Optional[str] = None):
-    """Lista arquivos da pasta outputs de uma sessão."""
-    outputs_dir = _get_session_outputs_dir(session_id)
+    """List output files."""
+    sid = session_id or get_current_session_id()
+    if not sid:
+        return {"files": [], "session_id": None}
 
+    outputs_dir = OUTPUTS_DIR / sid
     if not outputs_dir.exists():
-        return {"files": [], "directory": str(outputs_dir), "session_id": session_id}
+        return {"files": [], "session_id": sid}
 
     files = []
     for file in outputs_dir.iterdir():
@@ -583,29 +530,33 @@ async def list_outputs(session_id: Optional[str] = None):
             })
 
     files.sort(key=lambda f: f["modified"], reverse=True)
-    return {"files": files, "directory": str(outputs_dir), "session_id": session_id}
+    return {"files": files, "session_id": sid}
+
 
 @app.get("/outputs/file/{filename}")
 async def get_output_file(filename: str, session_id: Optional[str] = None):
-    """Retorna conteúdo de um arquivo de output."""
-    from fastapi.responses import FileResponse
+    """Get output file content."""
+    sid = session_id or get_current_session_id()
+    if not sid:
+        raise HTTPException(status_code=404, detail="No session")
 
-    outputs_dir = _get_session_outputs_dir(session_id)
-    file_path = outputs_dir / filename
-
+    file_path = OUTPUTS_DIR / sid / filename
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(file_path, filename=filename)
 
+
 @app.delete("/outputs/{filename}")
 async def delete_output(filename: str, session_id: Optional[str] = None):
-    """Deleta um arquivo da pasta outputs de uma sessão."""
-    outputs_dir = _get_session_outputs_dir(session_id)
-    file_path = outputs_dir / filename
+    """Delete output file."""
+    sid = session_id or get_current_session_id()
+    if not sid:
+        return {"success": False, "error": "No session"}
 
+    file_path = OUTPUTS_DIR / sid / filename
     if not file_path.exists():
-        return {"success": False, "error": "Arquivo nao encontrado"}
+        return {"success": False, "error": "File not found"}
 
     try:
         file_path.unlink()
@@ -613,164 +564,94 @@ async def delete_output(filename: str, session_id: Optional[str] = None):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# =============================================================================
-# ENDPOINTS DE AUDITORIA - Tool Calls
-# =============================================================================
 
-AUDIT_DIR = Path.home() / ".claude" / ".agentfs" / "audit"
-STATIC_DIR = Path(__file__).parent / "static"
-
+# =============================================================================
+# AUDIT ENDPOINTS
+# =============================================================================
 
 @app.get("/audit/tools")
 async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
-    """
-    Retorna histórico de tool calls da sessão.
+    """Get tool call history."""
+    sid = session_id or get_current_session_id()
+    if not sid:
+        return {"error": "No active session", "records": []}
 
-    Args:
-        limit: Número máximo de registros (padrão 100)
-        session_id: ID da sessão (opcional, usa atual se não fornecido)
-    """
-    if not session_id:
-        session_id = _get_current_session_id()
+    # Get from AgentFS tools
+    if rag:
+        try:
+            stats = await rag.tools.get_stats()
+            recent = await rag.tools.get_recent(limit=limit)
+            return {
+                "session_id": sid,
+                "stats": [{"name": s.name, "calls": s.total_calls, "avg_ms": s.avg_duration_ms} for s in stats],
+                "recent": recent[:limit],
+                "count": len(recent),
+            }
+        except:
+            pass
 
-    if not session_id or session_id == "default":
-        return {"error": "Nenhuma sessão ativa", "records": []}
-
-    audit_file = AUDIT_DIR / f"{session_id}.jsonl"
-
-    if not audit_file.exists():
-        return {
-            "session_id": session_id,
-            "records": [],
-            "count": 0,
-            "message": "Nenhum registro de auditoria ainda"
-        }
-
-    records = []
-    try:
-        with open(audit_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
-
-        # Limitar e ordenar por mais recente
-        records = records[-limit:]
-        records.reverse()
-
-        return {
-            "session_id": session_id,
-            "records": records,
-            "count": len(records)
-        }
-    except Exception as e:
-        return {"error": str(e), "session_id": session_id}
+    return {"session_id": sid, "records": [], "count": 0}
 
 
 @app.get("/audit/stats")
 async def get_audit_stats(session_id: Optional[str] = None):
-    """Retorna estatísticas de auditoria da sessão."""
-    if not session_id:
-        session_id = _get_current_session_id()
+    """Get audit statistics."""
+    sid = session_id or get_current_session_id()
+    if not sid:
+        return {"error": "No active session"}
 
-    if not session_id or session_id == "default":
-        return {"error": "Nenhuma sessão ativa"}
+    if rag:
+        try:
+            stats = await rag.tools.get_stats()
+            return {
+                "session_id": sid,
+                "total_calls": sum(s.total_calls for s in stats),
+                "by_tool": {s.name: s.total_calls for s in stats},
+                "avg_duration_ms": sum(s.avg_duration_ms for s in stats) / len(stats) if stats else 0,
+            }
+        except:
+            pass
 
-    audit_file = AUDIT_DIR / f"{session_id}.jsonl"
+    return {"session_id": sid, "total_calls": 0, "by_tool": {}}
 
-    if not audit_file.exists():
-        return {
-            "session_id": session_id,
-            "total_calls": 0,
-            "by_tool": {},
-            "errors": 0,
-            "avg_duration_ms": 0
-        }
+
+# =============================================================================
+# AGENTFS KV ENDPOINTS (for debugging)
+# =============================================================================
+
+@app.get("/kv/list")
+async def list_kv(prefix: str = ""):
+    """List KV store keys."""
+    if not rag:
+        return {"keys": [], "error": "No session"}
 
     try:
-        records = []
-        with open(audit_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
-
-        if not records:
-            return {
-                "session_id": session_id,
-                "total_calls": 0,
-                "by_tool": {},
-                "errors": 0,
-                "avg_duration_ms": 0
-            }
-
-        by_tool = {}
-        total_duration = 0
-        errors = 0
-
-        for r in records:
-            tool = r.get("tool_name", "unknown")
-            by_tool[tool] = by_tool.get(tool, 0) + 1
-            total_duration += r.get("duration_ms", 0)
-            if r.get("error"):
-                errors += 1
-
-        return {
-            "session_id": session_id,
-            "total_calls": len(records),
-            "by_tool": by_tool,
-            "errors": errors,
-            "avg_duration_ms": round(total_duration / len(records), 2),
-            "first_call": records[0].get("started_at") if records else None,
-            "last_call": records[-1].get("completed_at") if records else None
-        }
+        keys = await rag.kv.list(prefix=prefix if prefix else None)
+        return {"keys": keys, "count": len(keys)}
     except Exception as e:
-        return {"error": str(e), "session_id": session_id}
+        return {"keys": [], "error": str(e)}
 
 
-@app.get("/audit/sessions")
-async def list_audit_sessions():
-    """Lista todas as sessões com dados de auditoria."""
-    if not AUDIT_DIR.exists():
-        return {"sessions": [], "count": 0}
+@app.get("/kv/{key}")
+async def get_kv(key: str):
+    """Get KV value."""
+    if not rag:
+        raise HTTPException(status_code=404, detail="No session")
 
-    sessions = []
-    for file in sorted(AUDIT_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True):
-        try:
-            # Contar linhas (tool calls)
-            with open(file, 'r') as f:
-                lines = [l for l in f if l.strip()]
-
-            sessions.append({
-                "session_id": file.stem,
-                "tool_calls": len(lines),
-                "file_size": file.stat().st_size,
-                "modified": file.stat().st_mtime * 1000
-            })
-        except Exception as e:
-            print(f"Erro ao ler audit file {file}: {e}")
-
-    return {
-        "sessions": sessions,
-        "count": len(sessions),
-        "audit_dir": str(AUDIT_DIR)
-    }
+    try:
+        value = await rag.kv.get(key)
+        if value is None:
+            raise HTTPException(status_code=404, detail="Key not found")
+        return {"key": key, "value": value}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/audit/dashboard")
-async def get_audit_dashboard():
-    """Serve o dashboard HTML de auditoria."""
-    dashboard_path = STATIC_DIR / "audit_dashboard.html"
-
-    if not dashboard_path.exists():
-        raise HTTPException(status_code=404, detail="Dashboard not found")
-
-    return FileResponse(
-        dashboard_path,
-        media_type="text/html",
-        filename="audit_dashboard.html"
-    )
-
+# =============================================================================
+# MAIN
+# =============================================================================
 
 if __name__ == "__main__":
     import uvicorn
