@@ -74,12 +74,7 @@ async def get_rag() -> ClaudeRAG:
             "created_at": time.time(),
         })
 
-        # Create output directories in AgentFS filesystem
-        await rag.fs.mkdir("/outputs")
-        await rag.fs.mkdir("/reports")
-        await rag.fs.mkdir("/logs")
-
-        # Write session start log
+        # Write session start log (directories are created automatically)
         await rag.fs.write_file(
             f"/logs/session_start.txt",
             f"Session {current_session_id} started at {time.strftime('%Y-%m-%d %H:%M:%S')}"

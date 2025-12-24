@@ -156,26 +156,33 @@ Sempre use search_documents antes de responder qualquer pergunta."""
             AgentResponse with answer and citations
         """
         try:
-            from claude_agent_sdk import query as sdk_query, AssistantMessage, TextBlock, ToolUseBlock
-        except ImportError:
+            from claude_agent_sdk import ClaudeSDKClient, AssistantMessage, TextBlock, ToolUseBlock
+        except ImportError as e:
+            print(f"[DEBUG] Import error details: {e}")
+            import traceback
+            traceback.print_exc()
             raise ImportError(
-                "claude-agent-sdk required for agent queries: pip install claude-agent-sdk"
+                f"claude-agent-sdk required for agent queries: pip install claude-agent-sdk (original error: {e})"
             )
 
         options = self._get_agent_options()
         response_text = ""
         tool_calls = []
 
-        async for message in sdk_query(prompt=question, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text += block.text
-                    elif isinstance(block, ToolUseBlock):
-                        tool_calls.append({
-                            "name": block.name,
-                            "input": block.input,
-                        })
+        # Use ClaudeSDKClient (works with Claude Code subscription)
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(question)
+
+            async for message in client.receive_response():
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            response_text += block.text
+                        elif isinstance(block, ToolUseBlock):
+                            tool_calls.append({
+                                "name": block.name,
+                                "input": block.input,
+                            })
 
         # Parse citations from response
         citations, confidence = self._parse_response(response_text)

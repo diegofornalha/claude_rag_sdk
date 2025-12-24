@@ -276,14 +276,14 @@ class ClaudeRAG:
         call_id = await self.tools.start("query", {"question": question[:100]})
 
         try:
-            # Use SimpleAgent with our search engine (no MCP required)
-            from .agent import SimpleAgent
-            agent = SimpleAgent(
-                search_engine=self._search,
-                model=self._options.agent_model,
-                system_prompt=self._options.system_prompt,
-            )
-            response = await agent.query(question)
+            # Use AgentEngine with Claude Agent SDK (uses Claude Code subscription)
+            if self._agent is None:
+                from .agent import AgentEngine
+                self._agent = AgentEngine(
+                    options=self._options,
+                    mcp_server_path=None,  # No MCP server needed
+                )
+            response = await self._agent.query(question)
 
             await self.tools.success(call_id, {
                 "citations": len(response.citations),
