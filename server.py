@@ -358,6 +358,29 @@ async def chat(
             }, indent=2, ensure_ascii=False)
         )
 
+        # Organize outputs: move files from root to session folder
+        import shutil
+        outputs_root = Path.cwd() / "outputs"
+        tmp_outputs = Path("/tmp/outputs")
+        session_outputs = outputs_root / current_session_id
+
+        # Create session folder if it doesn't exist
+        session_outputs.mkdir(parents=True, exist_ok=True)
+
+        # Move any files from backend/outputs root to session folder
+        if outputs_root.exists():
+            for item in outputs_root.iterdir():
+                if item.is_file():  # Only move files, not directories
+                    target = session_outputs / item.name
+                    shutil.move(str(item), str(target))
+
+        # Also check and move files from /tmp/outputs
+        if tmp_outputs.exists():
+            for item in tmp_outputs.iterdir():
+                if item.is_file():  # Only move files, not directories
+                    target = session_outputs / item.name
+                    shutil.move(str(item), str(target))
+
         return ChatResponse(response=response_text)
 
     except Exception as e:
@@ -634,12 +657,16 @@ async def delete_session(session_id: str):
         audit_file.unlink()
         deleted.append(str(audit_file))
 
-    # Delete legacy JSONL session if exists
-    old_sessions_dir = Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend"
-    jsonl_file = old_sessions_dir / f"{session_id}.jsonl"
-    if jsonl_file.exists():
-        jsonl_file.unlink()
-        deleted.append(str(jsonl_file))
+    # Delete legacy JSONL session if exists (check multiple locations)
+    old_sessions_dirs = [
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+    ]
+    for old_dir in old_sessions_dirs:
+        jsonl_file = old_dir / f"{session_id}.jsonl"
+        if jsonl_file.exists():
+            jsonl_file.unlink()
+            deleted.append(str(jsonl_file))
 
     # Delete outputs folder for this session
     import shutil
