@@ -59,7 +59,7 @@ async def search_test(query: str, top_k: int = 5):
                     "id": r.doc_id,
                     "source": r.source,
                     "content": r.content,
-                    "score": round(r.score, 4),
+                    "score": round(r.similarity, 4),
                     "metadata": r.metadata
                 }
                 for r in results
