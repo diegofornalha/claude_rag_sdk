@@ -22,6 +22,7 @@ prompt_guard = PromptGuard(strict_mode=False)
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    model: Optional[str] = "haiku"  # haiku, sonnet, opus
 
 
 class ChatResponse(BaseModel):
@@ -48,7 +49,7 @@ async def chat(
         )
 
     try:
-        c = await get_client()
+        c = await get_client(model=chat_request.model)
 
         session_specific_afs = None
         target_session_id = chat_request.session_id or app_state.current_session_id

@@ -105,6 +105,27 @@ async def root():
     return response
 
 
+@app.get("/model")
+async def get_current_model():
+    """Return current active model."""
+    return {
+        "model": app_state.current_model,
+        "model_id": _get_model_id(app_state.current_model),
+        "session_id": app_state.current_session_id,
+        "client_active": app_state.client is not None
+    }
+
+
+def _get_model_id(model_name: str) -> str:
+    """Get full model ID from short name."""
+    MODEL_IDS = {
+        "haiku": "claude-haiku-4-5-20251001",
+        "sonnet": "claude-sonnet-4-5-20250929",
+        "opus": "claude-opus-4-5-20251101",
+    }
+    return MODEL_IDS.get(model_name, f"claude-{model_name}-latest")
+
+
 @app.get("/health")
 async def health_check():
     """Detailed health check."""
