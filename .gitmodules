@@ -4,3 +4,6 @@
 [submodule ".agentfs"]
 	path = .agentfs
 	url = file:///Users/2a/.claude/hello-agent/chat-simples/backend/.agentfs
+[submodule "agentfs"]
+	path = agentfs
+	url = file:///Users/2a/.claude/hello-agent/chat-simples/backend/agentfs

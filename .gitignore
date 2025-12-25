@@ -38,4 +38,4 @@ Thumbs.db
 outputs/
 
 # AgentFS submodule (use as dependency)
-agentfs/
+# agentfs/ is now a submodule, so it's tracked
