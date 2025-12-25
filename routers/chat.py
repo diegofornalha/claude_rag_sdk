@@ -14,24 +14,9 @@ from claude_rag_sdk.core.prompt_guard import PromptGuard
 from claude_rag_sdk.core.auth import verify_api_key
 
 from app_state import get_client, get_agentfs
+from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Chat"])
-
-
-def validate_session_id(session_id: str) -> bool:
-    """Validate session_id to prevent path traversal attacks.
-
-    Returns True if valid, raises HTTPException if invalid.
-    """
-    if not session_id:
-        return False
-    # Only allow UUID-like patterns and alphanumeric with hyphens
-    if not re.match(r'^[a-zA-Z0-9\-_]+$', session_id):
-        raise HTTPException(status_code=400, detail="Invalid session_id format")
-    # Prevent path traversal
-    if '..' in session_id or '/' in session_id or '\\' in session_id:
-        raise HTTPException(status_code=400, detail="Invalid session_id: path traversal detected")
-    return True
 
 # RAG Knowledge base path (separado do AgentFS para evitar conflitos)
 RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"

@@ -151,7 +151,13 @@ def collect_backend_files() -> list[tuple[Path, str]]:
 def load_cache() -> dict:
     """Carrega cache de arquivos já ingeridos."""
     if CACHE_FILE.exists():
-        return json.loads(CACHE_FILE.read_text())
+        try:
+            content = CACHE_FILE.read_text()
+            if content.strip():
+                return json.loads(content)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"⚠️  Cache corrompido, resetando: {e}")
+            CACHE_FILE.unlink()
     return {}
 
 

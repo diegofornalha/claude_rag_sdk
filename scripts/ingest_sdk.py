@@ -17,7 +17,8 @@ from claude_rag_sdk.ingest import IngestEngine
 from claude_rag_sdk.options import ChunkingStrategy
 
 
-SDK_PATH = Path("/Users/2a/.claude/claude-agent-sdk-python")
+# Use Path.home() for portability across different environments
+SDK_PATH = Path.home() / ".claude" / "claude-agent-sdk-python"
 BACKEND_PATH = Path(__file__).parent.parent
 
 IGNORE_DIRS = {

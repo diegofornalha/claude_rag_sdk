@@ -14,6 +14,7 @@ from app_state import (
     get_current_session_id,
     reset_session,
 )
+from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Sessions"])
 limiter = get_limiter()
@@ -168,6 +169,9 @@ async def list_sessions():
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session (AgentFS or legacy JSONL)."""
+    # Validate session_id to prevent path traversal
+    validate_session_id(session_id)
+
     if session_id == app_state.current_session_id:
         return {"success": False, "error": "Cannot delete active session"}
 
@@ -205,12 +209,16 @@ async def delete_session(session_id: str):
 @router.get("/sessions/{session_id}")
 async def get_session_details(session_id: str):
     """Get session details with messages."""
+    # Validate session_id to prevent path traversal
+    validate_session_id(session_id)
     return await get_session_messages(session_id)
 
 
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
     """Get messages from a session (supports both AgentFS and legacy JSONL)."""
+    # Validate session_id to prevent path traversal
+    validate_session_id(session_id)
     import json
 
     old_sessions_dirs = [

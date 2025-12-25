@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app_state import get_agentfs
 import app_state
+from utils.validators import validate_session_id, validate_filename, validate_directory_path
 
 router = APIRouter(prefix="/outputs", tags=["Outputs"])
 
@@ -12,7 +13,10 @@ router = APIRouter(prefix="/outputs", tags=["Outputs"])
 async def list_outputs(directory: str = "outputs", session_id: str = None):
     """List output files from physical filesystem."""
     try:
+        # Validate inputs
+        validate_directory_path(directory, allowed_prefixes=['outputs', '/outputs'])
         if session_id:
+            validate_session_id(session_id)
             outputs_dir = Path.cwd() / directory / session_id
         else:
             outputs_dir = Path.cwd() / directory
@@ -45,6 +49,9 @@ async def list_outputs(directory: str = "outputs", session_id: str = None):
 @router.get("/file/{filename:path}")
 async def get_output_file(filename: str):
     """Get output file content from AgentFS filesystem."""
+    # Validate filename to prevent path traversal
+    validate_filename(filename)
+
     afs = await get_agentfs()
 
     try:
@@ -63,6 +70,10 @@ async def get_output_file(filename: str):
 @router.post("/write")
 async def write_output_file(filename: str, content: str, directory: str = "/outputs"):
     """Write file to AgentFS filesystem."""
+    # Validate inputs to prevent path traversal
+    validate_filename(filename)
+    validate_directory_path(directory, allowed_prefixes=['/outputs', '/logs'])
+
     afs = await get_agentfs()
 
     try:
@@ -81,6 +92,9 @@ async def write_output_file(filename: str, content: str, directory: str = "/outp
 @router.delete("/{filename:path}")
 async def delete_output(filename: str):
     """Delete file from AgentFS filesystem."""
+    # Validate filename to prevent path traversal
+    validate_filename(filename)
+
     try:
         afs = await get_agentfs()
         filepath = f"/outputs/{filename}" if not filename.startswith("/") else filename
