@@ -332,6 +332,10 @@ async def chat_stream(
             status_code=400, detail=f"Message blocked: {scan_result.threat_level.value}"
         )
 
+    # Validar session_id para prevenir path traversal
+    if chat_request.session_id:
+        validate_session_id(chat_request.session_id)
+
     r = None
     afs = None
     try:
@@ -375,6 +379,17 @@ async def chat_stream(
                     print(f"[STREAM] Histórico salvo: {len(history)} mensagens")
                 except Exception as save_err:
                     print(f"[WARN] Erro ao salvar histórico: {save_err}")
+
+                # Também salvar no JSONL quando session_id específico é fornecido
+                if chat_request.session_id:
+                    try:
+                        append_to_jsonl(
+                            session_id=chat_request.session_id,
+                            user_message=chat_request.message,
+                            assistant_response=full_response,
+                        )
+                    except Exception as jsonl_err:
+                        print(f"[WARN] Erro ao salvar JSONL: {jsonl_err}")
 
                 yield "data: [DONE]\n\n"
             except Exception as e:

@@ -193,8 +193,10 @@ async def delete_session(session_id: str):
     # Validate session_id to prevent path traversal
     validate_session_id(session_id)
 
-    if session_id == app_state.current_session_id:
-        return {"success": False, "error": "Cannot delete active session"}
+    # Se for a sessão ativa, resetar para uma nova antes de deletar
+    was_active = session_id == app_state.current_session_id
+    if was_active:
+        await reset_session()
 
     deleted = []
 
@@ -214,6 +216,12 @@ async def delete_session(session_id: str):
         audit_file.unlink()
         deleted.append(str(audit_file))
 
+    # Deletar JSONL no SESSIONS_DIR
+    sessions_jsonl = SESSIONS_DIR / f"{session_id}.jsonl"
+    if sessions_jsonl.exists():
+        sessions_jsonl.unlink()
+        deleted.append(str(sessions_jsonl))
+
     old_sessions_dirs = [
         Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
         Path.home()
@@ -232,7 +240,12 @@ async def delete_session(session_id: str):
         shutil.rmtree(outputs_dir)
         deleted.append(str(outputs_dir))
 
-    return {"success": True, "deleted": deleted}
+    return {
+        "success": True,
+        "deleted": deleted,
+        "was_active": was_active,
+        "new_session_id": app_state.current_session_id if was_active else None,
+    }
 
 
 @router.get("/sessions/{session_id}")
