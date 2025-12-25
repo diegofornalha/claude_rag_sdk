@@ -267,6 +267,7 @@ if SLOWAPI_AVAILABLE:
 
 class ChatRequest(BaseModel):
     message: str
+    session_id: Optional[str] = None  # Permite continuar conversa de sessão específica
 
 
 class ChatResponse(BaseModel):
@@ -349,14 +350,25 @@ async def chat(
         from claude_agent_sdk import AssistantMessage, TextBlock, ToolUseBlock, ToolResultBlock
 
         c = await get_client()
-        afs = await get_agentfs()
+
+        # Se session_id foi passado, usar AgentFS específico da sessão
+        session_specific_afs = None
+        target_session_id = chat_request.session_id or current_session_id
+
+        if chat_request.session_id and chat_request.session_id != current_session_id:
+            # Abrir AgentFS da sessão específica
+            session_specific_afs = await AgentFS.open(AgentFSOptions(id=chat_request.session_id))
+            afs = session_specific_afs
+            print(f"📂 Usando sessão específica: {chat_request.session_id}")
+        else:
+            afs = await get_agentfs()
 
         # Track the query
         call_id = await afs.tools.start("chat", {"message": chat_request.message[:100]})
 
         # Incluir session_id como contexto para o LLM saber onde salvar arquivos
-        outputs_path = str(Path.cwd() / "outputs" / current_session_id)
-        context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {current_session_id}]
+        outputs_path = str(Path.cwd() / "outputs" / target_session_id)
+        context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
 Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
 Exemplo: {outputs_path}/meu_arquivo.txt
 
@@ -400,17 +412,35 @@ Exemplo: {outputs_path}/meu_arquivo.txt
         # Complete tracking
         await afs.tools.success(call_id, {"response_length": len(response_text)})
 
-        # Store in conversation history (KV)
+        # Store in conversation history (KV) - incluir todas as mensagens para consistência
         history = await afs.kv.get("conversation:history") or []
+
+        # Adicionar mensagem do usuário
         history.append({
             "role": "user",
             "content": chat_request.message,
         })
+
+        # Adicionar tool calls como mensagens separadas (para consistência com .jsonl)
+        for tool_use_id, tool_call_id in tool_calls.items():
+            history.append({
+                "role": "assistant",
+                "content": f"[Tool Call: {tool_use_id}]",
+                "type": "tool_use"
+            })
+            history.append({
+                "role": "tool",
+                "content": f"[Tool Result: {tool_use_id}]",
+                "type": "tool_result"
+            })
+
+        # Adicionar resposta final do assistente
         history.append({
             "role": "assistant",
             "content": response_text,
         })
-        await afs.kv.set("conversation:history", history[-50:])  # Keep last 50
+
+        await afs.kv.set("conversation:history", history[-100:])  # Keep last 100
 
         # Save response to filesystem for persistence
         timestamp = time.strftime('%Y%m%d_%H%M%S')
@@ -426,7 +456,7 @@ Exemplo: {outputs_path}/meu_arquivo.txt
         # Organize outputs: move files from various locations to session folder
         import shutil
         outputs_root = Path.cwd() / "outputs"
-        session_outputs = outputs_root / current_session_id
+        session_outputs = outputs_root / target_session_id
 
         # Create session folder if it doesn't exist
         session_outputs.mkdir(parents=True, exist_ok=True)
@@ -447,7 +477,7 @@ Exemplo: {outputs_path}/meu_arquivo.txt
                         target = session_outputs / item.name
                         if not target.exists():  # Avoid overwriting
                             shutil.move(str(item), str(target))
-                            print(f"📦 Moved {item.name} from {default_folder}/ to {current_session_id}/")
+                            print(f"📦 Moved {item.name} from {default_folder}/ to {target_session_id}/")
 
         # Also check and move files from /tmp/outputs
         tmp_outputs = Path("/tmp/outputs")
@@ -456,6 +486,11 @@ Exemplo: {outputs_path}/meu_arquivo.txt
                 if item.is_file():
                     target = session_outputs / item.name
                     shutil.move(str(item), str(target))
+
+        # Fechar AgentFS específico da sessão se foi aberto
+        if session_specific_afs:
+            await session_specific_afs.close()
+            print(f"📂 Sessão específica fechada: {chat_request.session_id}")
 
         return ChatResponse(response=response_text)
 
@@ -656,17 +691,28 @@ async def list_sessions():
             if session_id.endswith("_rag"):
                 session_id = session_id[:-4]  # Remove "_rag"
 
-            # Try to get message count from KV
+            # Try to get message count - preferir .jsonl como fonte (dados completos)
             message_count = 0
             output_count = 0
+
+            # Primeiro: verificar se existe .jsonl correspondente (fonte completa)
+            jsonl_file = SESSIONS_DIR / f"{session_id}.jsonl"
+            if jsonl_file.exists():
+                try:
+                    with open(jsonl_file, 'r') as f:
+                        message_count = len(f.readlines())
+                except:
+                    pass
+
             try:
                 # Open AgentFS for this session to get data
                 session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
 
-                # Get message count from conversation history
-                history = await session_agentfs.kv.get("conversation:history")
-                if history:
-                    message_count = len(history)
+                # Se não tem .jsonl, usar KV store como fallback
+                if message_count == 0:
+                    history = await session_agentfs.kv.get("conversation:history")
+                    if history:
+                        message_count = len(history)
 
                 # Get output count from filesystem
                 try:
