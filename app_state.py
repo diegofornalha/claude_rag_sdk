@@ -52,15 +52,25 @@ def extract_session_id_from_jsonl() -> Optional[str]:
     return None
 
 
-def _get_agent_model(model_name: str) -> "AgentModel":
-    """Converte nome do modelo para AgentModel enum."""
+def _get_agent_model(model_name: str) -> tuple["AgentModel", str]:
+    """Converte nome do modelo para AgentModel enum.
+
+    Returns:
+        Tuple of (AgentModel enum, normalized model name string)
+    """
     from claude_rag_sdk import AgentModel
     model_map = {
         "haiku": AgentModel.HAIKU,
         "sonnet": AgentModel.SONNET,
         "opus": AgentModel.OPUS,
     }
-    return model_map.get(model_name.lower(), AgentModel.HAIKU)
+    normalized = model_name.lower()
+    if normalized in model_map:
+        return model_map[normalized], normalized
+    else:
+        # Invalid model - fallback to haiku
+        print(f"[WARN] Invalid model '{model_name}', using 'haiku' as fallback")
+        return AgentModel.HAIKU, "haiku"
 
 
 async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
@@ -124,8 +134,8 @@ async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
 - Forneça citações com fonte e trecho quando aplicável"""
 
         # Usar modelo solicitado
-        agent_model = _get_agent_model(requested_model)
-        current_model = requested_model
+        agent_model, normalized_model = _get_agent_model(requested_model)
+        current_model = normalized_model
 
         temp_options = ClaudeRAGOptions(
             id="temp",

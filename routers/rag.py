@@ -118,6 +118,39 @@ async def rag_stats():
             await temp_rag.close()
 
 
+@router.post("/reingest")
+async def reingest_backend(api_key: str = Depends(verify_api_key)):
+    """Reingest backend files (run ingest_backend.py)."""
+    import subprocess
+    from pathlib import Path
+
+    script_path = Path(__file__).parent.parent / "scripts" / "ingest_backend.py"
+
+    if not script_path.exists():
+        raise HTTPException(status_code=404, detail="Ingest script not found")
+
+    try:
+        result = subprocess.run(
+            ["python", str(script_path)],
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 min timeout
+            cwd=str(script_path.parent.parent)
+        )
+
+        return {
+            "success": result.returncode == 0,
+            "output": result.stdout,
+            "error": result.stderr if result.returncode != 0 else None,
+            "returncode": result.returncode
+        }
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
+    except Exception as e:
+        print(f"[ERROR] Reingest failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/config")
 async def rag_config():
     """Get RAG configuration and statistics."""
