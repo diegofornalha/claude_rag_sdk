@@ -40,7 +40,7 @@ async def main():
     result = await engine.add_document(ebook_path)
 
     if result.success:
-        print(f"✅ Sucesso!")
+        print("✅ Sucesso!")
         print(f"   - Document ID: {result.doc_id}")
         print(f"   - Chunks criados: {result.chunks}")
         print(f"   - Fonte: {result.source}")

@@ -1,7 +1,9 @@
 """Audit endpoints."""
-from fastapi import APIRouter
-from typing import Optional
+
 import time
+from typing import Optional
+
+from fastapi import APIRouter
 
 from app_state import AGENTFS_DIR, get_current_session_id
 from utils.debug_parser import parse_debug_file
@@ -20,7 +22,12 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
 
     session_db = AGENTFS_DIR / f"{sid}.db"
     if not session_db.exists():
-        return {"error": "No active session", "session_id": None, "records": [], "count": 0}
+        return {
+            "error": "No active session",
+            "session_id": None,
+            "records": [],
+            "count": 0,
+        }
 
     session_afs = None
     try:
@@ -32,27 +39,36 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
 
         recent_dicts = []
         for call in recent[:limit]:
-            recent_dicts.append({
-                "id": call.id,
-                "name": call.name,
-                "started_at": call.started_at,
-                "completed_at": call.completed_at,
-                "duration_ms": call.duration_ms,
-                "status": call.status,
-                "parameters": call.parameters,
-                "result": call.result,
-                "error": call.error,
-            })
+            recent_dicts.append(
+                {
+                    "id": call.id,
+                    "name": call.name,
+                    "started_at": call.started_at,
+                    "completed_at": call.completed_at,
+                    "duration_ms": call.duration_ms,
+                    "status": call.status,
+                    "parameters": call.parameters,
+                    "result": call.result,
+                    "error": call.error,
+                }
+            )
 
         return {
             "session_id": sid,
-            "stats": [{"name": s.name, "calls": s.total_calls, "avg_ms": s.avg_duration_ms} for s in stats],
+            "stats": [
+                {"name": s.name, "calls": s.total_calls, "avg_ms": s.avg_duration_ms} for s in stats
+            ],
             "recent": recent_dicts,
             "count": len(recent_dicts),
         }
     except Exception as e:
         print(f"[AUDIT] Error getting tools for {sid}: {e}")
-        return {"session_id": sid, "records": [], "count": 0, "error": "Failed to get tool records"}
+        return {
+            "session_id": sid,
+            "records": [],
+            "count": 0,
+            "error": "Failed to get tool records",
+        }
     finally:
         if session_afs:
             await session_afs.close()
@@ -80,11 +96,16 @@ async def get_audit_stats(session_id: Optional[str] = None):
             "session_id": sid,
             "total_calls": sum(s.total_calls for s in stats),
             "by_tool": {s.name: s.total_calls for s in stats},
-            "avg_duration_ms": sum(s.avg_duration_ms for s in stats) / len(stats) if stats else 0,
+            "avg_duration_ms": (sum(s.avg_duration_ms for s in stats) / len(stats) if stats else 0),
         }
     except Exception as e:
         print(f"[AUDIT] Error getting stats for {sid}: {e}")
-        return {"session_id": sid, "total_calls": 0, "by_tool": {}, "error": "Failed to get statistics"}
+        return {
+            "session_id": sid,
+            "total_calls": 0,
+            "by_tool": {},
+            "error": "Failed to get statistics",
+        }
     finally:
         if session_afs:
             await session_afs.close()
@@ -101,7 +122,12 @@ async def get_debug_log(session_id: str):
             "found": False,
             "entries": [],
             "count": 0,
-            "summary": {"total_events": 0, "tool_events": 0, "file_writes": 0, "streams": 0}
+            "summary": {
+                "total_events": 0,
+                "tool_events": 0,
+                "file_writes": 0,
+                "streams": 0,
+            },
         }
 
     return {
@@ -114,7 +140,7 @@ async def get_debug_log(session_id: str):
                 "level": e.level,
                 "message": e.message,
                 "tool_name": e.tool_name,
-                "event_type": e.event_type
+                "event_type": e.event_type,
             }
             for e in entries
         ],
@@ -122,9 +148,9 @@ async def get_debug_log(session_id: str):
         "summary": {
             "total_events": len(entries),
             "tool_events": len([e for e in entries if e.tool_name]),
-            "file_writes": len([e for e in entries if e.event_type == 'file_write']),
-            "streams": len([e for e in entries if e.event_type == 'stream'])
-        }
+            "file_writes": len([e for e in entries if e.event_type == "file_write"]),
+            "streams": len([e for e in entries if e.event_type == "stream"]),
+        },
     }
 
 
@@ -148,7 +174,7 @@ async def get_enriched_tools(session_id: str, limit: int = 50):
                 "duration_ms": call.duration_ms,
                 "status": call.status,
                 "parameters": call.parameters,
-                "result": call.result
+                "result": call.result,
             }
             for call in recent
         ]
@@ -168,12 +194,18 @@ async def get_enriched_tools(session_id: str, limit: int = 50):
         for entry in debug_entries:
             time_diff = abs(entry.timestamp_ms - tool_start)
             if time_diff < 2000:
-                if entry.tool_name == tool_name or entry.event_type in ['pre_hook', 'post_hook', 'file_write']:
-                    relevant_debug.append({
-                        "timestamp": entry.timestamp,
-                        "event_type": entry.event_type,
-                        "message": entry.message[:200]
-                    })
+                if entry.tool_name == tool_name or entry.event_type in [
+                    "pre_hook",
+                    "post_hook",
+                    "file_write",
+                ]:
+                    relevant_debug.append(
+                        {
+                            "timestamp": entry.timestamp,
+                            "event_type": entry.event_type,
+                            "message": entry.message[:200],
+                        }
+                    )
 
         tool["debug"] = relevant_debug
         tool["debug_count"] = len(relevant_debug)
@@ -183,5 +215,5 @@ async def get_enriched_tools(session_id: str, limit: int = 50):
         "tools": tools_data,
         "debug_available": len(debug_entries) > 0,
         "debug_total": len(debug_entries),
-        "enriched": True
+        "enriched": True,
     }

@@ -1,11 +1,12 @@
 """File watcher for automatic RAG reindexing using Watchdog."""
-import asyncio
+
 import subprocess
 import threading
 from pathlib import Path
 from typing import Optional
+
+from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent
 
 
 class BackendFileHandler(FileSystemEventHandler):
@@ -40,15 +41,15 @@ class BackendFileHandler(FileSystemEventHandler):
         path = Path(file_path)
 
         # Ignorar arquivos que não são Python
-        if path.suffix != '.py':
+        if path.suffix != ".py":
             return
 
         # Ignorar __pycache__, .pyc, testes, etc
-        if any(part.startswith(('.', '__pycache__')) for part in path.parts):
+        if any(part.startswith((".", "__pycache__")) for part in path.parts):
             return
 
         # Ignorar scripts de ingestão (evitar loop)
-        if 'ingest' in path.name.lower() or 'scripts' in str(path):
+        if "ingest" in path.name.lower() or "scripts" in str(path):
             return
 
         print(f"[WATCHDOG] Mudança detectada: {path.name}")
@@ -73,7 +74,9 @@ class BackendFileHandler(FileSystemEventHandler):
             files_changed = len(self.pending_files)
             self.pending_files.clear()
 
-        print(f"[WATCHDOG] Executando reingestão automática ({files_changed} arquivo(s) modificado(s))...")
+        print(
+            f"[WATCHDOG] Executando reingestão automática ({files_changed} arquivo(s) modificado(s))..."
+        )
 
         try:
             result = subprocess.run(
@@ -81,7 +84,7 @@ class BackendFileHandler(FileSystemEventHandler):
                 capture_output=True,
                 text=True,
                 timeout=300,
-                cwd=str(self.ingest_script.parent.parent)
+                cwd=str(self.ingest_script.parent.parent),
             )
 
             if result.returncode == 0:
@@ -92,10 +95,13 @@ class BackendFileHandler(FileSystemEventHandler):
                 else:
                     # Tentar extrair número de arquivos processados
                     import re
-                    match = re.search(r'Novos/Atualizados:\s*(\d+)', output)
+
+                    match = re.search(r"Novos/Atualizados:\s*(\d+)", output)
                     if match:
                         count = match.group(1)
-                        print(f"[WATCHDOG] ✓ Reingestão concluída: {count} arquivo(s) atualizado(s)")
+                        print(
+                            f"[WATCHDOG] ✓ Reingestão concluída: {count} arquivo(s) atualizado(s)"
+                        )
                     else:
                         print("[WATCHDOG] ✓ Reingestão concluída")
             else:
@@ -129,10 +135,7 @@ class FileWatcherService:
         if not self.ingest_script.exists():
             raise FileNotFoundError(f"Ingest script not found: {self.ingest_script}")
 
-        self.handler = BackendFileHandler(
-            ingest_script_path=self.ingest_script,
-            cooldown_seconds=5
-        )
+        self.handler = BackendFileHandler(ingest_script_path=self.ingest_script, cooldown_seconds=5)
 
         self.observer = Observer()
         self.observer.schedule(self.handler, str(self.backend_path), recursive=True)
@@ -168,7 +171,7 @@ class FileWatcherService:
             "active": self.is_active(),
             "watching_path": str(self.backend_path),
             "cooldown_seconds": self.handler.cooldown if self.handler else 5,
-            "pending_files": len(self.handler.pending_files) if self.handler else 0
+            "pending_files": len(self.handler.pending_files) if self.handler else 0,
         }
 
 

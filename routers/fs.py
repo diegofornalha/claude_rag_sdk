@@ -1,8 +1,9 @@
 """Filesystem and KV endpoints."""
+
 from fastapi import APIRouter, HTTPException
 
-from app_state import get_agentfs
 import app_state
+from app_state import get_agentfs
 
 router = APIRouter(tags=["FileSystem"])
 
@@ -13,6 +14,7 @@ async def get_filesystem_tree(path: str = "/"):
     afs = await get_agentfs()
 
     try:
+
         async def list_tree(dir_path: str, depth: int = 0) -> list:
             if depth > 3:
                 return []

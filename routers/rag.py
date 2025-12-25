@@ -1,11 +1,12 @@
 """RAG endpoints."""
-from fastapi import APIRouter, Request, Depends, HTTPException
-from pathlib import Path
-import os
 
-from claude_rag_sdk.core.auth import verify_api_key
+import os
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 import app_state
+from claude_rag_sdk.core.auth import verify_api_key
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
@@ -18,13 +19,11 @@ RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
 
 @router.post("/search")
 async def rag_search(
-    request: Request,
-    query: str,
-    top_k: int = 5,
-    api_key: str = Depends(verify_api_key)
+    request: Request, query: str, top_k: int = 5, api_key: str = Depends(verify_api_key)
 ):
     """Search documents using RAG."""
     from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+
     temp_rag = None
     try:
         temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
@@ -46,7 +45,12 @@ async def rag_search(
 async def search_test(query: str, top_k: int = 5):
     """Test search endpoint (no auth required for testing)."""
     if not RAG_DB_PATH.exists():
-        return {"query": query, "results": [], "count": 0, "error": "Database not found"}
+        return {
+            "query": query,
+            "results": [],
+            "count": 0,
+            "error": "Database not found",
+        }
 
     engine = None
     try:
@@ -68,11 +72,11 @@ async def search_test(query: str, top_k: int = 5):
                     "source": r.source,
                     "content": r.content,
                     "score": round(r.similarity, 4),
-                    "metadata": r.metadata
+                    "metadata": r.metadata,
                 }
                 for r in results
             ],
-            "count": len(results)
+            "count": len(results),
         }
     except Exception as e:
         print(f"[ERROR] RAG search test failed: {e}")
@@ -84,13 +88,11 @@ async def search_test(query: str, top_k: int = 5):
 
 @router.post("/ingest")
 async def rag_ingest(
-    request: Request,
-    content: str,
-    source: str,
-    api_key: str = Depends(verify_api_key)
+    request: Request, content: str, source: str, api_key: str = Depends(verify_api_key)
 ):
     """Add document to RAG."""
     from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+
     temp_rag = None
     try:
         temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
@@ -108,6 +110,7 @@ async def rag_ingest(
 async def rag_stats():
     """Get RAG statistics."""
     from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+
     temp_rag = None
     try:
         temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
@@ -138,14 +141,14 @@ async def reingest_backend(api_key: str = Depends(verify_api_key)):
             capture_output=True,
             text=True,
             timeout=300,  # 5 min timeout
-            cwd=str(script_path.parent.parent)
+            cwd=str(script_path.parent.parent),
         )
 
         return {
             "success": result.returncode == 0,
             "output": result.stdout,
             "error": result.stderr if result.returncode != 0 else None,
-            "returncode": result.returncode
+            "returncode": result.returncode,
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
@@ -171,14 +174,14 @@ async def reingest_sdk(api_key: str = Depends(verify_api_key)):
             capture_output=True,
             text=True,
             timeout=300,  # 5 min timeout
-            cwd=str(script_path.parent.parent)
+            cwd=str(script_path.parent.parent),
         )
 
         return {
             "success": result.returncode == 0,
             "output": result.stdout,
             "error": result.stderr if result.returncode != 0 else None,
-            "returncode": result.returncode
+            "returncode": result.returncode,
         }
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
@@ -190,7 +193,6 @@ async def reingest_sdk(api_key: str = Depends(verify_api_key)):
 @router.get("/config")
 async def rag_config():
     """Get RAG configuration and statistics."""
-    import os
 
     db_exists = RAG_DB_PATH.exists()
     db_size = RAG_DB_PATH.stat().st_size if db_exists else 0
@@ -199,16 +201,16 @@ async def rag_config():
         "total_documents": 0,
         "total_embeddings": 0,
         "total_size_bytes": 0,
-        "status": "empty"
+        "status": "empty",
     }
 
     if db_exists and db_size > 0:
         engine = None
         try:
             from claude_rag_sdk.ingest import IngestEngine
+
             engine = IngestEngine(
-                db_path=str(RAG_DB_PATH),
-                embedding_model="BAAI/bge-small-en-v1.5"
+                db_path=str(RAG_DB_PATH), embedding_model="BAAI/bge-small-en-v1.5"
             )
             stats = engine.stats
         except Exception as e:
@@ -225,7 +227,7 @@ async def rag_config():
         "stats": stats,
         "embedding_model": "BAAI/bge-small-en-v1.5",
         "chunk_size": 500,
-        "chunk_overlap": 50
+        "chunk_overlap": 50,
     }
 
 
@@ -245,7 +247,7 @@ async def watcher_start(api_key: str = Depends(verify_api_key)):
         return {
             "success": True,
             "message": "File watcher started",
-            "status": watcher.get_status()
+            "status": watcher.get_status(),
         }
     except Exception as e:
         print(f"[ERROR] Failed to start watcher: {e}")
@@ -261,7 +263,7 @@ async def watcher_stop(api_key: str = Depends(verify_api_key)):
         return {
             "success": True,
             "message": "File watcher stopped",
-            "status": watcher.get_status()
+            "status": watcher.get_status(),
         }
     except Exception as e:
         print(f"[ERROR] Failed to stop watcher: {e}")
@@ -271,13 +273,12 @@ async def watcher_stop(api_key: str = Depends(verify_api_key)):
 @router.delete("/reset")
 async def rag_reset(api_key: str = Depends(verify_api_key)):
     """Delete RAG database and reset to empty state."""
-    import os
 
     if not RAG_DB_PATH.exists():
         return {
             "success": True,
             "message": "Database already empty",
-            "deleted_files": []
+            "deleted_files": [],
         }
 
     deleted = []
@@ -302,7 +303,7 @@ async def rag_reset(api_key: str = Depends(verify_api_key)):
         return {
             "success": True,
             "message": "RAG database deleted successfully",
-            "deleted_files": deleted
+            "deleted_files": deleted,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete RAG database: {str(e)}")
@@ -312,7 +313,7 @@ def _format_size(size_bytes: int) -> str:
     """Format bytes to human readable string."""
     if size_bytes == 0:
         return "0 B"
-    for unit in ['B', 'KB', 'MB', 'GB']:
+    for unit in ["B", "KB", "MB", "GB"]:
         if size_bytes < 1024:
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024
@@ -321,11 +322,12 @@ def _format_size(size_bytes: int) -> str:
 
 # === DOCUMENT LISTING ===
 
+
 @router.get("/documents")
 async def list_documents(limit: int = 50, offset: int = 0):
     """List all documents in RAG database."""
-    import sqlite3
     import json
+    import sqlite3
 
     if not RAG_DB_PATH.exists():
         return {"documents": [], "total": 0}
@@ -340,7 +342,8 @@ async def list_documents(limit: int = 50, offset: int = 0):
             total = cursor.fetchone()[0]
 
             # Get documents with pagination
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     id,
                     nome,
@@ -353,15 +356,17 @@ async def list_documents(limit: int = 50, offset: int = 0):
                 FROM documentos
                 ORDER BY criado_em DESC
                 LIMIT ? OFFSET ?
-            """, [limit, offset])
+            """,
+                [limit, offset],
+            )
 
             documents = []
             for row in cursor.fetchall():
                 doc = dict(row)
                 # Parse metadata if JSON
-                if doc.get('metadata'):
+                if doc.get("metadata"):
                     try:
-                        doc['metadata'] = json.loads(doc['metadata'])
+                        doc["metadata"] = json.loads(doc["metadata"])
                     except json.JSONDecodeError as e:
                         print(f"[WARN] Failed to parse metadata JSON: {e}")
                         pass  # Keep raw metadata if not valid JSON
@@ -371,7 +376,7 @@ async def list_documents(limit: int = 50, offset: int = 0):
                 "documents": documents,
                 "total": total,
                 "limit": limit,
-                "offset": offset
+                "offset": offset,
             }
 
     except Exception as e:
@@ -382,8 +387,8 @@ async def list_documents(limit: int = 50, offset: int = 0):
 @router.get("/documents/{doc_id}")
 async def get_document(doc_id: int):
     """Get document details including content and chunks."""
-    import sqlite3
     import json
+    import sqlite3
 
     if not RAG_DB_PATH.exists():
         raise HTTPException(status_code=404, detail="RAG database not found")
@@ -394,9 +399,12 @@ async def get_document(doc_id: int):
             cursor = conn.cursor()
 
             # Get document
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT * FROM documentos WHERE id = ?
-            """, [doc_id])
+            """,
+                [doc_id],
+            )
 
             row = cursor.fetchone()
             if not row:
@@ -405,14 +413,14 @@ async def get_document(doc_id: int):
             doc = dict(row)
 
             # Parse metadata
-            if doc.get('metadata'):
+            if doc.get("metadata"):
                 try:
-                    doc['metadata'] = json.loads(doc['metadata'])
+                    doc["metadata"] = json.loads(doc["metadata"])
                 except json.JSONDecodeError as e:
                     print(f"[WARN] Failed to parse metadata JSON: {e}")
                     pass  # Keep raw metadata if not valid JSON
 
-            doc['has_embedding'] = True  # Assume yes (embedding is created with doc)
+            doc["has_embedding"] = True  # Assume yes (embedding is created with doc)
 
             return doc
 
@@ -456,7 +464,7 @@ async def delete_document(doc_id: int, api_key: str = Depends(verify_api_key)):
         return {
             "success": True,
             "message": f"Document '{nome}' deleted",
-            "doc_id": doc_id
+            "doc_id": doc_id,
         }
 
     except HTTPException:

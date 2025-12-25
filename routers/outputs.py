@@ -1,10 +1,12 @@
 """Outputs endpoints."""
-from fastapi import APIRouter, HTTPException
+
 from pathlib import Path
 
-from app_state import get_agentfs
+from fastapi import APIRouter, HTTPException
+
 import app_state
-from utils.validators import validate_session_id, validate_filename, validate_directory_path
+from app_state import get_agentfs
+from utils.validators import validate_directory_path, validate_filename, validate_session_id
 
 router = APIRouter(prefix="/outputs", tags=["Outputs"])
 
@@ -14,7 +16,7 @@ async def list_outputs(directory: str = "outputs", session_id: str = None):
     """List output files from physical filesystem."""
     try:
         # Validate inputs
-        validate_directory_path(directory, allowed_prefixes=['outputs', '/outputs'])
+        validate_directory_path(directory, allowed_prefixes=["outputs", "/outputs"])
         if session_id:
             validate_session_id(session_id)
             outputs_dir = Path.cwd() / directory / session_id
@@ -22,17 +24,24 @@ async def list_outputs(directory: str = "outputs", session_id: str = None):
             outputs_dir = Path.cwd() / directory
 
         if not outputs_dir.exists():
-            return {"files": [], "directory": str(outputs_dir), "count": 0, "session_id": session_id}
+            return {
+                "files": [],
+                "directory": str(outputs_dir),
+                "count": 0,
+                "session_id": session_id,
+            }
 
         files = []
         for file in outputs_dir.iterdir():
             if file.is_file():
                 stat = file.stat()
-                files.append({
-                    "name": file.name,
-                    "size": stat.st_size,
-                    "modified": stat.st_mtime * 1000
-                })
+                files.append(
+                    {
+                        "name": file.name,
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime * 1000,
+                    }
+                )
 
         files.sort(key=lambda f: f["modified"], reverse=True)
         return {
@@ -43,7 +52,11 @@ async def list_outputs(directory: str = "outputs", session_id: str = None):
         }
     except Exception as e:
         print(f"[ERROR] Failed to list outputs: {e}")
-        return {"files": [], "error": "Failed to list outputs", "session_id": session_id}
+        return {
+            "files": [],
+            "error": "Failed to list outputs",
+            "session_id": session_id,
+        }
 
 
 @router.get("/file/{filename:path}")
@@ -72,7 +85,7 @@ async def write_output_file(filename: str, content: str, directory: str = "/outp
     """Write file to AgentFS filesystem."""
     # Validate inputs to prevent path traversal
     validate_filename(filename)
-    validate_directory_path(directory, allowed_prefixes=['/outputs', '/logs'])
+    validate_directory_path(directory, allowed_prefixes=["/outputs", "/logs"])
 
     afs = await get_agentfs()
 

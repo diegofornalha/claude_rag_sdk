@@ -16,15 +16,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from claude_rag_sdk.ingest import IngestEngine
 from claude_rag_sdk.options import ChunkingStrategy
 
-
 # Use Path.home() for portability across different environments
 SDK_PATH = Path.home() / ".claude" / "claude-agent-sdk-python"
 BACKEND_PATH = Path(__file__).parent.parent
 
 IGNORE_DIRS = {
-    "__pycache__", ".git", ".venv", "venv", "env",
-    ".pytest_cache", ".ruff_cache", "node_modules",
-    ".egg-info", "build", "dist", ".mypy_cache",
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    ".pytest_cache",
+    ".ruff_cache",
+    "node_modules",
+    ".egg-info",
+    "build",
+    "dist",
+    ".mypy_cache",
 }
 
 
@@ -32,9 +40,9 @@ def should_ignore(path: Path) -> bool:
     """Verifica se deve ignorar arquivo/diretório."""
     if any(part in IGNORE_DIRS for part in path.parts):
         return True
-    if path.name.startswith('.') and path.name not in ['.env.example']:
+    if path.name.startswith(".") and path.name not in [".env.example"]:
         return True
-    if path.suffix in ['.pyc', '.pyo', '.db', '.db-wal', '.db-shm']:
+    if path.suffix in [".pyc", ".pyo", ".db", ".db-wal", ".db-shm"]:
         return True
     return False
 
@@ -69,7 +77,7 @@ async def main():
     db_path = BACKEND_PATH / "data" / "rag_knowledge.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"📦 Claude Agent SDK Python")
+    print("📦 Claude Agent SDK Python")
     print(f"📂 Caminho: {SDK_PATH}")
     print(f"💾 Banco de dados: {db_path}")
 
@@ -112,7 +120,7 @@ async def main():
                     "project": "claude-agent-sdk",
                     "file_path": str(file_path.relative_to(SDK_PATH)),
                     "file_type": file_path.suffix,
-                }
+                },
             )
 
             if result.success:
@@ -132,7 +140,7 @@ async def main():
 
     print()
     print("=" * 50)
-    print(f"📊 Resumo da Ingestão SDK")
+    print("📊 Resumo da Ingestão SDK")
     print(f"   - Arquivos processados: {len(all_files)}")
     print(f"   - Novos/Atualizados: {success_count}")
     print(f"   - Erros: {error_count}")
@@ -141,7 +149,7 @@ async def main():
 
     # Stats do banco
     stats = engine.stats
-    print(f"📊 Estatísticas do banco:")
+    print("📊 Estatísticas do banco:")
     print(f"   - Total documentos: {stats['total_documents']}")
     print(f"   - Total embeddings: {stats['total_embeddings']}")
     print(f"   - Status: {stats['status']}")

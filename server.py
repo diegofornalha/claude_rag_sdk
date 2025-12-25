@@ -10,29 +10,28 @@ Production-ready FastAPI server with:
 - Audit trail
 """
 
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import os
-
-from claude_rag_sdk.core.auth import is_auth_enabled
-from claude_rag_sdk.core.rate_limiter import SLOWAPI_AVAILABLE
 
 import app_state
-
+from claude_rag_sdk.core.auth import is_auth_enabled
+from claude_rag_sdk.core.rate_limiter import SLOWAPI_AVAILABLE
 from routers import (
     audit_router,
     chat_router,
+    fs_router,
+    outputs_router,
     rag_router,
     sessions_router,
-    outputs_router,
-    fs_router,
 )
-
 
 # =============================================================================
 # FASTAPI APP
 # =============================================================================
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,6 +41,7 @@ async def lifespan(app: FastAPI):
     # Cleanup watcher before app_state
     try:
         from utils.file_watcher import get_watcher
+
         watcher = get_watcher()
         if watcher.is_active():
             watcher.stop()
@@ -54,7 +54,7 @@ app = FastAPI(
     title="Chat Simples",
     description="Chat backend powered by Claude RAG SDK",
     version="3.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS
@@ -76,7 +76,9 @@ app.add_middleware(
 if SLOWAPI_AVAILABLE:
     from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
+
     from claude_rag_sdk.core.rate_limiter import get_limiter
+
     app.state.limiter = get_limiter()
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -97,6 +99,7 @@ app.include_router(fs_router)
 # HEALTH ENDPOINTS
 # =============================================================================
 
+
 @app.get("/")
 async def root():
     """Health check."""
@@ -106,12 +109,13 @@ async def root():
         "session_active": app_state.client is not None,
         "session_id": app_state.current_session_id,
         "message": "Chat Simples v3 - Claude RAG SDK",
-        "auth_enabled": is_auth_enabled()
+        "auth_enabled": is_auth_enabled(),
     }
 
     # Em desenvolvimento, expor dev key para facilitar testes
     if env == "development" and is_auth_enabled():
         from claude_rag_sdk.core.auth import VALID_API_KEYS
+
         if VALID_API_KEYS:
             response["dev_key"] = list(VALID_API_KEYS)[0]
 
@@ -125,7 +129,7 @@ async def get_current_model():
         "model": app_state.current_model,
         "model_id": _get_model_id(app_state.current_model),
         "session_id": app_state.current_session_id,
-        "client_active": app_state.client is not None
+        "client_active": app_state.client is not None,
     }
 
 
@@ -157,8 +161,8 @@ async def health_check():
         "security": {
             "auth_enabled": is_auth_enabled(),
             "rate_limiter": "slowapi" if SLOWAPI_AVAILABLE else "simple",
-            "prompt_guard": "active"
-        }
+            "prompt_guard": "active",
+        },
     }
 
 
@@ -168,4 +172,5 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8001)

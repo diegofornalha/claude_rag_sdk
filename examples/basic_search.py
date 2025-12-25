@@ -2,6 +2,7 @@
 """Basic search example for Claude RAG SDK."""
 
 import asyncio
+
 from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
 
 
@@ -12,7 +13,7 @@ async def main():
     print("=" * 60)
 
     # Open RAG instance
-    async with await ClaudeRAG.open(ClaudeRAGOptions(id='search-example')) as rag:
+    async with await ClaudeRAG.open(ClaudeRAGOptions(id="search-example")) as rag:
         # Add some sample documents
         print("\n1. Adding sample documents...")
 

@@ -1,9 +1,10 @@
 """Core module - shared state and helper functions."""
-from pathlib import Path
-from typing import Optional
+
 import asyncio
 import json
 import time
+from pathlib import Path
+from typing import Optional
 
 # =============================================================================
 # CONFIGURATION
@@ -12,7 +13,12 @@ import time
 AGENTFS_DIR = Path.cwd() / ".agentfs"
 
 # Sessions directory (Claude Code uses cwd-based path)
-SESSIONS_DIR = Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs"
+SESSIONS_DIR = (
+    Path.home()
+    / ".claude"
+    / "projects"
+    / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs"
+)
 
 # Global client and AgentFS instances
 client: Optional["ClaudeSDKClient"] = None
@@ -25,15 +31,14 @@ current_model: str = "haiku"  # Modelo atual: haiku, sonnet, opus
 # SESSION MANAGEMENT
 # =============================================================================
 
+
 def extract_session_id_from_jsonl() -> Optional[str]:
     """Extrai session_id do arquivo JSONL mais recente."""
     if not SESSIONS_DIR.exists():
         return None
 
     jsonl_files = sorted(
-        SESSIONS_DIR.glob("*.jsonl"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True
+        SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True
     )
 
     if not jsonl_files:
@@ -41,7 +46,7 @@ def extract_session_id_from_jsonl() -> Optional[str]:
 
     latest_jsonl = jsonl_files[0]
     try:
-        with open(latest_jsonl, 'r') as f:
+        with open(latest_jsonl, "r") as f:
             first_line = f.readline().strip()
             if first_line:
                 data = json.loads(first_line)
@@ -59,6 +64,7 @@ def _get_agent_model(model_name: str) -> tuple["AgentModel", str]:
         Tuple of (AgentModel enum, normalized model name string)
     """
     from claude_rag_sdk import AgentModel
+
     model_map = {
         "haiku": AgentModel.HAIKU,
         "sonnet": AgentModel.SONNET,
@@ -115,9 +121,10 @@ async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
             current_session_id = None
 
     if client is None:
-        from claude_rag_sdk.agent import AgentEngine
-        from claude_rag_sdk import ClaudeRAGOptions
         from claude_agent_sdk import ClaudeSDKClient
+
+        from claude_rag_sdk import ClaudeRAGOptions
+        from claude_rag_sdk.agent import AgentEngine
 
         outputs_base = str(Path.cwd() / "outputs")
         system_prompt = f"""Você é um assistente RAG especializado em responder perguntas usando uma base de conhecimento.
@@ -138,9 +145,7 @@ async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
         current_model = normalized_model
 
         temp_options = ClaudeRAGOptions(
-            id="temp",
-            agent_model=agent_model,
-            system_prompt=system_prompt
+            id="temp", agent_model=agent_model, system_prompt=system_prompt
         )
         engine = AgentEngine(options=temp_options, mcp_server_path=None)
         client_options = engine._get_agent_options()
@@ -164,17 +169,21 @@ async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
         current_session_id = new_session_id
 
         from agentfs_sdk import AgentFS, AgentFSOptions
+
         agentfs = await AgentFS.open(AgentFSOptions(id=current_session_id))
 
-        await agentfs.kv.set("session:info", {
-            "id": current_session_id,
-            "model": current_model,
-            "created_at": time.time(),
-        })
+        await agentfs.kv.set(
+            "session:info",
+            {
+                "id": current_session_id,
+                "model": current_model,
+                "created_at": time.time(),
+            },
+        )
 
         await agentfs.fs.write_file(
-            f"/logs/session_start.txt",
-            f"Session {current_session_id} | Model: {current_model} | {time.strftime('%Y-%m-%d %H:%M:%S')}"
+            "/logs/session_start.txt",
+            f"Session {current_session_id} | Model: {current_model} | {time.strftime('%Y-%m-%d %H:%M:%S')}",
         )
 
         session_file = AGENTFS_DIR / "current_session"

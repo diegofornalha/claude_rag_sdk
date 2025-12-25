@@ -9,18 +9,16 @@ Uso:
 """
 
 import asyncio
-import sys
 import hashlib
 import json
+import sys
 from pathlib import Path
-from datetime import datetime
 
 # Adicionar o diretório pai ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from claude_rag_sdk.ingest import IngestEngine
 from claude_rag_sdk.options import ChunkingStrategy
-
 
 SDK_PATH = Path.home() / ".claude" / "claude-agent-sdk-python"
 CACHE_FILE = Path(__file__).parent.parent / "data" / ".sdk_ingest_cache.json"
@@ -106,7 +104,7 @@ async def main():
     db_path = Path(__file__).parent.parent / "data" / "rag_knowledge.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"📦 Claude Agent SDK Python")
+    print("📦 Claude Agent SDK Python")
     print(f"📂 Caminho: {SDK_PATH}")
     print(f"💾 Banco de dados: {db_path}")
 
@@ -124,11 +122,11 @@ async def main():
     if stats_only:
         # Apenas mostrar estatísticas
         modified = filter_modified_files(all_files, cache)
-        print(f"\n📊 Status:")
+        print("\n📊 Status:")
         print(f"   - Arquivos no cache: {len(cache)}")
         print(f"   - Arquivos modificados/novos: {len(modified)}")
         if modified:
-            print(f"\n📝 Arquivos para atualizar:")
+            print("\n📝 Arquivos para atualizar:")
             for f, s in modified[:10]:
                 print(f"   - {s}")
             if len(modified) > 10:
@@ -137,13 +135,13 @@ async def main():
 
     # Determinar quais arquivos processar
     if full_mode:
-        print(f"🔄 Modo FULL: reingerindo todos os arquivos")
+        print("🔄 Modo FULL: reingerindo todos os arquivos")
         files_to_process = all_files
         cache = {}  # Reset cache
     else:
         files_to_process = filter_modified_files(all_files, cache)
         if not files_to_process:
-            print(f"\n✅ Nenhum arquivo modificado. Base está atualizada!")
+            print("\n✅ Nenhum arquivo modificado. Base está atualizada!")
             return
         print(f"🔄 Modo INCREMENTAL: {len(files_to_process)} arquivos novos/modificados")
 
@@ -181,7 +179,7 @@ async def main():
                     "sdk": "claude-agent-sdk-python",
                     "file_path": str(file_path.relative_to(SDK_PATH)),
                     "file_type": file_path.suffix,
-                }
+                },
             )
 
             if result.success:
@@ -209,7 +207,7 @@ async def main():
 
     print()
     print("=" * 50)
-    print(f"📊 Resumo da Ingestão")
+    print("📊 Resumo da Ingestão")
     print(f"   - Arquivos processados: {len(files_to_process)}")
     print(f"   - Novos/Atualizados: {success_count}")
     print(f"   - Sem alteração: {skipped_count}")
@@ -225,7 +223,7 @@ async def main():
     print(f"   - Tamanho total: {stats['total_size_bytes']:,} bytes")
     print(f"   - Status: {stats['status']}")
 
-    print(f"\n💡 Dica: Use --stats para ver arquivos pendentes sem ingerir")
+    print("\n💡 Dica: Use --stats para ver arquivos pendentes sem ingerir")
 
 
 if __name__ == "__main__":

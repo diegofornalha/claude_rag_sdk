@@ -3,13 +3,8 @@
 
 import asyncio
 import os
-from claude_rag_sdk import (
-    ClaudeRAG,
-    ClaudeRAGOptions,
-    EmbeddingModel,
-    ChunkingStrategy,
-    AgentModel,
-)
+
+from claude_rag_sdk import AgentModel, ChunkingStrategy, ClaudeRAG, ClaudeRAGOptions, EmbeddingModel
 
 
 async def main():
@@ -21,33 +16,26 @@ async def main():
     # Production configuration
     options = ClaudeRAGOptions(
         # Identity
-        id='production-agent',
-
+        id="production-agent",
         # Use better embedding model for production
         embedding_model=EmbeddingModel.BGE_BASE,  # 768 dims, good balance
-
         # Chunking optimized for your content
         chunk_size=500,
         chunk_overlap=50,
         chunking_strategy=ChunkingStrategy.SENTENCE,  # Better for documents
-
         # Agent model
         agent_model=AgentModel.SONNET,  # Better reasoning
-
         # Enable all safety features
         enable_reranking=True,
         enable_adaptive_topk=True,
         enable_prompt_guard=True,
         enable_hybrid_search=True,
-
         # Search configuration
         default_top_k=5,
         vector_weight=0.7,
-
         # Cache configuration
         cache_ttl=3600,  # 1 hour
         cache_max_size=10000,
-
         # Resilience
         circuit_breaker_threshold=5,
         circuit_breaker_timeout=60.0,
@@ -64,19 +52,22 @@ async def main():
         print("\n3. Using AgentFS features:")
 
         # Store configuration
-        await rag.kv.set('app:config', {
-            'version': '1.0.0',
-            'environment': 'production',
-        })
+        await rag.kv.set(
+            "app:config",
+            {
+                "version": "1.0.0",
+                "environment": "production",
+            },
+        )
         print("   - Stored app config in KV store")
 
         # Create output directory
-        await rag.fs.write_file('/logs/startup.log', 'RAG system initialized\n')
+        await rag.fs.write_file("/logs/startup.log", "RAG system initialized\n")
         print("   - Created startup log")
 
         # Track custom operation
-        call_id = await rag.tools.start('startup', {'version': '1.0.0'})
-        await rag.tools.success(call_id, {'status': 'ready'})
+        call_id = await rag.tools.start("startup", {"version": "1.0.0"})
+        await rag.tools.success(call_id, {"status": "ready"})
         print("   - Logged startup to tool tracking")
 
         # Show stats
@@ -101,15 +92,15 @@ async def main():
 async def from_environment():
     """Load configuration from environment variables."""
     # Set environment variables
-    os.environ['CLAUDE_RAG_ID'] = 'env-agent'
-    os.environ['CLAUDE_RAG_EMBEDDING_MODEL'] = 'BAAI/bge-base-en-v1.5'
-    os.environ['CLAUDE_RAG_ENABLE_RERANKING'] = 'true'
-    os.environ['CLAUDE_RAG_DEFAULT_TOP_K'] = '10'
+    os.environ["CLAUDE_RAG_ID"] = "env-agent"
+    os.environ["CLAUDE_RAG_EMBEDDING_MODEL"] = "BAAI/bge-base-en-v1.5"
+    os.environ["CLAUDE_RAG_ENABLE_RERANKING"] = "true"
+    os.environ["CLAUDE_RAG_DEFAULT_TOP_K"] = "10"
 
     options = ClaudeRAGOptions.from_env()
     print(f"Loaded config for agent: {options.id}")
 
-    async with await ClaudeRAG.open(options) as rag:
+    async with await ClaudeRAG.open(options):
         print("RAG ready from environment config")
 
 

@@ -2,10 +2,9 @@
 Teste automatizado de todos os endpoints.
 Executa após refatoração para garantir que tudo funciona.
 """
-import pytest
+
 import httpx
-import asyncio
-from typing import Optional
+import pytest
 
 BASE_URL = "http://localhost:8001"
 
@@ -93,7 +92,7 @@ class TestEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert "session_id" in data or "error" in data
-        print(f"✓ GET /audit/stats")
+        print("✓ GET /audit/stats")
 
     def test_audit_debug(self, client):
         """GET /audit/debug/{session_id} - Debug do CLI."""
@@ -135,7 +134,7 @@ class TestEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert "tree" in data or "error" in data
-        print(f"✓ GET /fs/tree")
+        print("✓ GET /fs/tree")
 
     def test_kv_list(self, client):
         """GET /kv/list - Listar chaves KV."""
@@ -143,14 +142,14 @@ class TestEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert "keys" in data or "error" in data
-        print(f"✓ GET /kv/list")
+        print("✓ GET /kv/list")
 
 
 def run_all_tests():
     """Executa todos os testes e imprime resumo."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TESTE AUTOMATIZADO DE ENDPOINTS")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     client = httpx.Client(base_url=BASE_URL, timeout=30.0)
     tests = TestEndpoints()
@@ -181,18 +180,19 @@ def run_all_tests():
             print(f"✗ {name} - FALHOU: {e}")
             failed += 1
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print(f"RESULTADO: {passed}/{len(endpoints)} testes passaram")
     if failed > 0:
         print(f"⚠️  {failed} testes falharam")
     else:
         print("✅ Todos os testes passaram!")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     return failed == 0
 
 
 if __name__ == "__main__":
     import sys
+
     success = run_all_tests()
     sys.exit(0 if success else 1)

@@ -34,7 +34,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from claude_rag_sdk.ingest import IngestEngine
 from claude_rag_sdk.options import ChunkingStrategy
 
-
 # Configuracoes padrao
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "rag_knowledge.db"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
@@ -43,89 +42,78 @@ DEFAULT_CHUNK_OVERLAP = 50
 DEFAULT_STRATEGY = ChunkingStrategy.PARAGRAPH
 
 # Formatos suportados
-SUPPORTED_FORMATS = {'.txt', '.pdf', '.docx', '.html', '.htm', '.md', '.json'}
+SUPPORTED_FORMATS = {".txt", ".pdf", ".docx", ".html", ".htm", ".md", ".json"}
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Ingestao de documentos para RAG",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
 
-    parser.add_argument(
-        'files',
-        nargs='*',
-        help='Arquivos para ingerir'
-    )
+    parser.add_argument("files", nargs="*", help="Arquivos para ingerir")
 
     parser.add_argument(
-        '--dir', '-d',
+        "--dir",
+        "-d",
         type=str,
-        help='Diretorio para ingerir (todos os arquivos suportados)'
+        help="Diretorio para ingerir (todos os arquivos suportados)",
     )
 
     parser.add_argument(
-        '--recursive', '-r',
-        action='store_true',
-        help='Buscar recursivamente em subdiretorios'
+        "--recursive",
+        "-r",
+        action="store_true",
+        help="Buscar recursivamente em subdiretorios",
     )
 
-    parser.add_argument(
-        '--clear',
-        action='store_true',
-        help='Limpar banco RAG antes de ingerir'
-    )
+    parser.add_argument("--clear", action="store_true", help="Limpar banco RAG antes de ingerir")
 
     parser.add_argument(
-        '--chunk-size',
+        "--chunk-size",
         type=int,
         default=DEFAULT_CHUNK_SIZE,
-        help=f'Tamanho do chunk em palavras (default: {DEFAULT_CHUNK_SIZE})'
+        help=f"Tamanho do chunk em palavras (default: {DEFAULT_CHUNK_SIZE})",
     )
 
     parser.add_argument(
-        '--chunk-overlap',
+        "--chunk-overlap",
         type=int,
         default=DEFAULT_CHUNK_OVERLAP,
-        help=f'Overlap entre chunks (default: {DEFAULT_CHUNK_OVERLAP})'
+        help=f"Overlap entre chunks (default: {DEFAULT_CHUNK_OVERLAP})",
     )
 
     parser.add_argument(
-        '--strategy', '-s',
-        choices=['fixed', 'sentence', 'paragraph'],
-        default='paragraph',
-        help='Estrategia de chunking (default: paragraph)'
+        "--strategy",
+        "-s",
+        choices=["fixed", "sentence", "paragraph"],
+        default="paragraph",
+        help="Estrategia de chunking (default: paragraph)",
     )
 
     parser.add_argument(
-        '--model', '-m',
+        "--model",
+        "-m",
         type=str,
         default=DEFAULT_EMBEDDING_MODEL,
-        help=f'Modelo de embedding (default: {DEFAULT_EMBEDDING_MODEL})'
+        help=f"Modelo de embedding (default: {DEFAULT_EMBEDDING_MODEL})",
     )
 
     parser.add_argument(
-        '--db',
-        type=str,
-        default=str(DEFAULT_DB_PATH),
-        help='Caminho do banco de dados'
+        "--db", type=str, default=str(DEFAULT_DB_PATH), help="Caminho do banco de dados"
     )
 
-    parser.add_argument(
-        '--stats',
-        action='store_true',
-        help='Mostrar apenas estatisticas do banco'
-    )
+    parser.add_argument("--stats", action="store_true", help="Mostrar apenas estatisticas do banco")
 
     return parser.parse_args()
 
 
 def get_strategy(name: str) -> ChunkingStrategy:
     strategies = {
-        'fixed': ChunkingStrategy.FIXED,
-        'sentence': ChunkingStrategy.SENTENCE,
-        'paragraph': ChunkingStrategy.PARAGRAPH,
+        "fixed": ChunkingStrategy.FIXED,
+        "sentence": ChunkingStrategy.SENTENCE,
+        "paragraph": ChunkingStrategy.PARAGRAPH,
     }
     return strategies.get(name, ChunkingStrategy.PARAGRAPH)
 
@@ -133,13 +121,12 @@ def get_strategy(name: str) -> ChunkingStrategy:
 def find_files(directory: Path, recursive: bool = False) -> list[Path]:
     """Encontra todos os arquivos suportados em um diretorio."""
     files = []
-    pattern = '**/*' if recursive else '*'
 
     for fmt in SUPPORTED_FORMATS:
         if recursive:
-            files.extend(directory.rglob(f'*{fmt}'))
+            files.extend(directory.rglob(f"*{fmt}"))
         else:
-            files.extend(directory.glob(f'*{fmt}'))
+            files.extend(directory.glob(f"*{fmt}"))
 
     return sorted(files)
 
@@ -233,7 +220,7 @@ async def main():
         if result.success:
             success_count += 1
             if result.error and "duplicate" in result.error.lower():
-                print(f"   ⏭️  Ja existe (duplicado)")
+                print("   ⏭️  Ja existe (duplicado)")
             else:
                 print(f"   ✅ OK | ID: {result.doc_id} | Chunks: {result.chunks}")
         else:
@@ -247,7 +234,7 @@ async def main():
     print(f"   ❌ Erros:   {error_count}")
 
     stats = engine.stats
-    print(f"\n📈 Banco atualizado:")
+    print("\n📈 Banco atualizado:")
     print(f"   Documentos:  {stats['total_documents']}")
     print(f"   Embeddings:  {stats['total_embeddings']}")
     print(f"   Conteudo:    {stats['total_size_bytes']:,} bytes")

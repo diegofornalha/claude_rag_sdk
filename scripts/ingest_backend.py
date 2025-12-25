@@ -9,18 +9,16 @@ Uso:
 """
 
 import asyncio
-import sys
 import hashlib
 import json
+import sys
 from pathlib import Path
-from datetime import datetime
 
 # Adicionar o diretório pai ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from claude_rag_sdk.ingest import IngestEngine
 from claude_rag_sdk.options import ChunkingStrategy
-
 
 BACKEND_PATH = Path(__file__).parent.parent
 CACHE_FILE = BACKEND_PATH / "data" / ".backend_ingest_cache.json"
@@ -172,7 +170,9 @@ def get_file_hash(file_path: Path) -> str:
     return hashlib.md5(file_path.read_bytes()).hexdigest()
 
 
-def filter_modified_files(files: list[tuple[Path, str]], cache: dict, existing_sources: set = None) -> list[tuple[Path, str]]:
+def filter_modified_files(
+    files: list[tuple[Path, str]], cache: dict, existing_sources: set = None
+) -> list[tuple[Path, str]]:
     """Filtra apenas arquivos novos ou modificados.
 
     Args:
@@ -196,7 +196,9 @@ def filter_modified_files(files: list[tuple[Path, str]], cache: dict, existing_s
     return modified
 
 
-async def cleanup_deleted_files(engine: IngestEngine, current_files: list[tuple[Path, str]], cache: dict) -> int:
+async def cleanup_deleted_files(
+    engine: IngestEngine, current_files: list[tuple[Path, str]], cache: dict
+) -> int:
     """Remove documentos do RAG cujos arquivos foram deletados."""
     # Criar set de paths atuais
     current_paths = {str(f[0]) for f in current_files}
@@ -211,16 +213,21 @@ async def cleanup_deleted_files(engine: IngestEngine, current_files: list[tuple[
     deleted_count = 0
     for deleted_path in deleted_paths:
         # Buscar documento por metadata (file_path)
-        rel_path = Path(deleted_path).relative_to(BACKEND_PATH) if Path(deleted_path).is_absolute() else Path(deleted_path)
-        source_prefix = f"Backend - {rel_path}"
+        rel_path = (
+            Path(deleted_path).relative_to(BACKEND_PATH)
+            if Path(deleted_path).is_absolute()
+            else Path(deleted_path)
+        )
 
         # Tentar deletar via source name matching
         try:
             from claude_rag_sdk.search import SearchEngine
-            search = SearchEngine(db_path=str(BACKEND_PATH / "data" / "rag_knowledge.db"))
+
+            SearchEngine(db_path=str(BACKEND_PATH / "data" / "rag_knowledge.db"))
 
             # Buscar por source exato
             import sqlite3
+
             with sqlite3.connect(str(BACKEND_PATH / "data" / "rag_knowledge.db")) as conn:
                 cursor = conn.cursor()
 
@@ -250,7 +257,7 @@ async def main():
     db_path = BACKEND_PATH / "data" / "rag_knowledge.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"📦 Backend Chat-Simples")
+    print("📦 Backend Chat-Simples")
     print(f"📂 Caminho: {BACKEND_PATH}")
     print(f"💾 Banco de dados: {db_path}")
 
@@ -281,26 +288,33 @@ async def main():
     existing_sources = set()
     if not full_mode:
         try:
-            sources_list = await engine.search_engine.list_sources() if hasattr(engine, 'search_engine') else []
+            sources_list = (
+                await engine.search_engine.list_sources()
+                if hasattr(engine, "search_engine")
+                else []
+            )
             if not sources_list:
                 # Buscar diretamente do banco
                 import sqlite3
+
                 with sqlite3.connect(str(db_path)) as conn:
                     cursor = conn.cursor()
-                    existing_sources = {row[0] for row in cursor.execute("SELECT nome FROM documentos")}
+                    existing_sources = {
+                        row[0] for row in cursor.execute("SELECT nome FROM documentos")
+                    }
             else:
-                existing_sources = {s['nome'] for s in sources_list}
+                existing_sources = {s["nome"] for s in sources_list}
         except Exception as e:
             print(f"⚠️  Não foi possível verificar sources existentes: {e}")
 
     if stats_only:
         # Apenas mostrar estatísticas
         modified = filter_modified_files(all_files, cache, existing_sources)
-        print(f"\n📊 Status:")
+        print("\n📊 Status:")
         print(f"   - Arquivos no cache: {len(cache)}")
         print(f"   - Arquivos modificados/novos: {len(modified)}")
         if modified:
-            print(f"\n📝 Arquivos para atualizar:")
+            print("\n📝 Arquivos para atualizar:")
             for f, s in modified[:10]:
                 print(f"   - {s}")
             if len(modified) > 10:
@@ -309,7 +323,7 @@ async def main():
 
     # Determinar quais arquivos processar
     if full_mode:
-        print(f"🔄 Modo FULL: reingerindo todos os arquivos")
+        print("🔄 Modo FULL: reingerindo todos os arquivos")
         files_to_process = all_files
         cache = {}  # Reset cache
     else:
@@ -317,7 +331,7 @@ async def main():
         has_deletions = any(path not in {str(f[0]) for f in all_files} for path in cache.keys())
 
         if not files_to_process and not has_deletions:
-            print(f"\n✅ Nenhum arquivo modificado. Base está atualizada!")
+            print("\n✅ Nenhum arquivo modificado. Base está atualizada!")
             return
 
         if files_to_process:
@@ -347,7 +361,7 @@ async def main():
                     "project": "chat-simples-backend",
                     "file_path": str(file_path.relative_to(BACKEND_PATH)),
                     "file_type": file_path.suffix,
-                }
+                },
             )
 
             if result.success:
@@ -375,7 +389,7 @@ async def main():
 
     print()
     print("=" * 50)
-    print(f"📊 Resumo da Ingestão")
+    print("📊 Resumo da Ingestão")
     print(f"   - Arquivos processados: {len(files_to_process)}")
     print(f"   - Novos/Atualizados: {success_count}")
     print(f"   - Sem alteração: {skipped_count}")
@@ -391,7 +405,7 @@ async def main():
     print(f"   - Tamanho total: {stats['total_size_bytes']:,} bytes")
     print(f"   - Status: {stats['status']}")
 
-    print(f"\n💡 Dica: Use --stats para ver arquivos pendentes sem ingerir")
+    print("\n💡 Dica: Use --stats para ver arquivos pendentes sem ingerir")
 
 
 if __name__ == "__main__":

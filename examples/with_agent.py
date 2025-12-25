@@ -2,7 +2,8 @@
 """Q&A with AI agent example for Claude RAG SDK."""
 
 import asyncio
-from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions, AgentModel
+
+from claude_rag_sdk import AgentModel, ClaudeRAG, ClaudeRAGOptions
 
 
 async def main():
@@ -13,7 +14,7 @@ async def main():
 
     # Open RAG instance with agent configuration
     options = ClaudeRAGOptions(
-        id='qa-example',
+        id="qa-example",
         agent_model=AgentModel.HAIKU,  # Fast and cost-effective
         enable_reranking=True,
         default_top_k=5,
@@ -99,8 +100,8 @@ async def main():
             if response.citations:
                 print("Sources:")
                 for c in response.citations[:2]:
-                    quote = c.get('quote', '')[:50]
-                    print(f"  - {c['source']}: \"{quote}...\"")
+                    quote = c.get("quote", "")[:50]
+                    print(f'  - {c["source"]}: "{quote}..."')
 
             print("\n")
 

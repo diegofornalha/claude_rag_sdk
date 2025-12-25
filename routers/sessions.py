@@ -1,19 +1,14 @@
 """Sessions endpoints."""
-from fastapi import APIRouter, Request, Depends, HTTPException
-from pathlib import Path
-import shutil
 
-from claude_rag_sdk.core.rate_limiter import get_limiter
-from claude_rag_sdk.core.auth import verify_api_key
+import shutil
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 import app_state
-from app_state import (
-    AGENTFS_DIR,
-    SESSIONS_DIR,
-    get_agentfs,
-    get_current_session_id,
-    reset_session,
-)
+from app_state import AGENTFS_DIR, SESSIONS_DIR, get_current_session_id, reset_session
+from claude_rag_sdk.core.auth import verify_api_key
+from claude_rag_sdk.core.rate_limiter import get_limiter
 from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Sessions"])
@@ -26,21 +21,13 @@ async def get_current_session():
     session_id = get_current_session_id()
 
     if not session_id:
-        return {
-            "active": False,
-            "session_id": None,
-            "message": "No active session"
-        }
+        return {"active": False, "session_id": None, "message": "No active session"}
 
     session_db = AGENTFS_DIR / f"{session_id}.db"
     session_outputs = Path.cwd() / "outputs" / session_id
 
     if not session_db.exists() and not session_outputs.exists():
-        return {
-            "active": False,
-            "session_id": None,
-            "message": "No active session"
-        }
+        return {"active": False, "session_id": None, "message": "No active session"}
 
     session_info = None
     output_files = []
@@ -72,7 +59,7 @@ async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key
         "status": "ok",
         "message": "New session started!",
         "old_session_id": old_session,
-        "new_session_id": app_state.current_session_id
+        "new_session_id": app_state.current_session_id,
     }
 
 
@@ -80,11 +67,14 @@ async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key
 async def list_sessions():
     """List all sessions (AgentFS + old JSONL sessions)."""
     from agentfs_sdk import AgentFS, AgentFSOptions
+
     sessions = []
 
     if AGENTFS_DIR.exists():
         db_files = list(AGENTFS_DIR.glob("*.db"))
-        db_files = [f for f in db_files if not f.name.endswith(('-wal', '-shm', '.db-wal', '.db-shm'))]
+        db_files = [
+            f for f in db_files if not f.name.endswith(("-wal", "-shm", ".db-wal", ".db-shm"))
+        ]
 
         for db_file in sorted(db_files, key=lambda f: f.stat().st_mtime, reverse=True):
             session_id = db_file.stem
@@ -98,7 +88,7 @@ async def list_sessions():
             jsonl_file = SESSIONS_DIR / f"{session_id}.jsonl"
             if jsonl_file.exists():
                 try:
-                    with open(jsonl_file, 'r') as f:
+                    with open(jsonl_file, "r") as f:
                         message_count = len(f.readlines())
                 except (OSError, IOError):
                     pass  # File read failed, continue with count=0
@@ -123,46 +113,52 @@ async def list_sessions():
                 if session_agentfs:
                     await session_agentfs.close()
 
-            sessions.append({
-                "session_id": session_id,
-                "file": f"chat-simples/{session_id}",
-                "file_name": session_id,
-                "db_file": str(db_file),
-                "db_size": db_file.stat().st_size,
-                "updated_at": db_file.stat().st_mtime * 1000,
-                "is_current": session_id == app_state.current_session_id,
-                "message_count": message_count,
-                "has_outputs": output_count > 0,
-                "output_count": output_count,
-                "model": "claude-haiku-4-5",
-            })
+            sessions.append(
+                {
+                    "session_id": session_id,
+                    "file": f"chat-simples/{session_id}",
+                    "file_name": session_id,
+                    "db_file": str(db_file),
+                    "db_size": db_file.stat().st_size,
+                    "updated_at": db_file.stat().st_mtime * 1000,
+                    "is_current": session_id == app_state.current_session_id,
+                    "message_count": message_count,
+                    "has_outputs": output_count > 0,
+                    "output_count": output_count,
+                    "model": "claude-haiku-4-5",
+                }
+            )
 
     if SESSIONS_DIR.exists():
-        for jsonl_file in sorted(SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True):
+        for jsonl_file in sorted(
+            SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True
+        ):
             session_id = jsonl_file.stem
 
             message_count = 0
             try:
-                with open(jsonl_file, 'r') as f:
+                with open(jsonl_file, "r") as f:
                     message_count = len(f.readlines())
             except (OSError, IOError):
                 pass  # File read failed, continue with count=0
 
-            sessions.append({
-                "session_id": session_id,
-                "file": f"backend/{jsonl_file.name}",
-                "file_name": jsonl_file.name,
-                "db_file": str(jsonl_file),
-                "db_size": jsonl_file.stat().st_size,
-                "updated_at": jsonl_file.stat().st_mtime * 1000,
-                "is_current": False,
-                "message_count": message_count,
-                "has_outputs": False,
-                "output_count": 0,
-                "model": "claude-haiku-4-5",
-            })
+            sessions.append(
+                {
+                    "session_id": session_id,
+                    "file": f"backend/{jsonl_file.name}",
+                    "file_name": jsonl_file.name,
+                    "db_file": str(jsonl_file),
+                    "db_size": jsonl_file.stat().st_size,
+                    "updated_at": jsonl_file.stat().st_mtime * 1000,
+                    "is_current": False,
+                    "message_count": message_count,
+                    "has_outputs": False,
+                    "output_count": 0,
+                    "model": "claude-haiku-4-5",
+                }
+            )
 
-    sessions.sort(key=lambda s: s['updated_at'], reverse=True)
+    sessions.sort(key=lambda s: s["updated_at"], reverse=True)
     return {"count": len(sessions), "sessions": sessions}
 
 
@@ -177,7 +173,12 @@ async def delete_session(session_id: str):
 
     deleted = []
 
-    for pattern in [f"{session_id}.db", f"{session_id}.db-wal", f"{session_id}.db-shm", f"{session_id}_rag.db"]:
+    for pattern in [
+        f"{session_id}.db",
+        f"{session_id}.db-wal",
+        f"{session_id}.db-shm",
+        f"{session_id}_rag.db",
+    ]:
         f = AGENTFS_DIR / pattern
         if f.exists():
             f.unlink()
@@ -190,7 +191,10 @@ async def delete_session(session_id: str):
 
     old_sessions_dirs = [
         Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
-        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+        Path.home()
+        / ".claude"
+        / "projects"
+        / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
     ]
     for old_dir in old_sessions_dirs:
         jsonl_file = old_dir / f"{session_id}.jsonl"
@@ -223,7 +227,10 @@ async def get_session_messages(session_id: str):
 
     old_sessions_dirs = [
         Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
-        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+        Path.home()
+        / ".claude"
+        / "projects"
+        / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
     ]
 
     jsonl_file = None
@@ -236,17 +243,19 @@ async def get_session_messages(session_id: str):
     if jsonl_file:
         messages = []
         try:
-            with open(jsonl_file, 'r') as f:
+            with open(jsonl_file, "r") as f:
                 for line in f:
                     try:
                         entry = json.loads(line.strip())
-                        if entry.get('type') in ['user', 'assistant']:
-                            msg = entry.get('message', {})
-                            messages.append({
-                                'role': msg.get('role'),
-                                'content': msg.get('content'),
-                                'timestamp': entry.get('timestamp'),
-                            })
+                        if entry.get("type") in ["user", "assistant"]:
+                            msg = entry.get("message", {})
+                            messages.append(
+                                {
+                                    "role": msg.get("role"),
+                                    "content": msg.get("content"),
+                                    "timestamp": entry.get("timestamp"),
+                                }
+                            )
                     except json.JSONDecodeError:
                         continue  # Skip malformed JSON lines
             return {"messages": messages, "count": len(messages), "type": "jsonl"}

@@ -1,19 +1,19 @@
 """Chat endpoints."""
-from fastapi import APIRouter, Request, Depends, HTTPException
+
+import asyncio
+import json
+import time
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
-from pathlib import Path
-import json
-import asyncio
-import time
-import re
 
-from claude_rag_sdk.core.rate_limiter import get_limiter, RATE_LIMITS
-from claude_rag_sdk.core.prompt_guard import PromptGuard
+from app_state import get_agentfs, get_client
 from claude_rag_sdk.core.auth import verify_api_key
-
-from app_state import get_client, get_agentfs
+from claude_rag_sdk.core.prompt_guard import PromptGuard
+from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, get_limiter
 from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Chat"])
@@ -31,6 +31,7 @@ async def search_rag_context(query: str, top_k: int = 3) -> str:
 
     try:
         from claude_rag_sdk.search import SearchEngine
+
         engine = SearchEngine(
             db_path=str(RAG_DB_PATH),
             embedding_model="BAAI/bge-small-en-v1.5",
@@ -64,21 +65,17 @@ class ChatResponse(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 @limiter.limit(RATE_LIMITS.get("chat", "30/minute"))
-async def chat(
-    request: Request,
-    chat_request: ChatRequest,
-    api_key: str = Depends(verify_api_key)
-):
+async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depends(verify_api_key)):
     """Chat with RAG-powered AI."""
-    from claude_agent_sdk import AssistantMessage, TextBlock, ToolUseBlock, ToolResultBlock
     from agentfs_sdk import AgentFS, AgentFSOptions
+    from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, ToolUseBlock
+
     import app_state
 
     scan_result = prompt_guard.scan(chat_request.message)
     if not scan_result.is_safe:
         raise HTTPException(
-            status_code=400,
-            detail=f"Message blocked: {scan_result.threat_level.value}"
+            status_code=400, detail=f"Message blocked: {scan_result.threat_level.value}"
         )
 
     try:
@@ -136,8 +133,7 @@ Exemplo: {outputs_path}/meu_arquivo.txt
                         response_text += block.text
                     elif isinstance(block, ToolUseBlock):
                         tool_call_id = await afs.tools.start(
-                            block.name,
-                            {"input": str(block.input)[:500]}
+                            block.name, {"input": str(block.input)[:500]}
                         )
                         tool_calls[block.id] = tool_call_id
                         print(f"[TOOL] {block.name} (id: {block.id})")
@@ -145,7 +141,7 @@ Exemplo: {outputs_path}/meu_arquivo.txt
                         if block.tool_use_id in tool_calls:
                             await afs.tools.success(
                                 tool_calls[block.tool_use_id],
-                                {"result": str(block.content)[:500]}
+                                {"result": str(block.content)[:500]},
                             )
 
         for tool_use_id, tool_call_id in tool_calls.items():
@@ -157,23 +153,40 @@ Exemplo: {outputs_path}/meu_arquivo.txt
         history.append({"role": "user", "content": chat_request.message})
 
         for tool_use_id, tool_call_id in tool_calls.items():
-            history.append({"role": "assistant", "content": f"[Tool Call: {tool_use_id}]", "type": "tool_use"})
-            history.append({"role": "tool", "content": f"[Tool Result: {tool_use_id}]", "type": "tool_result"})
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": f"[Tool Call: {tool_use_id}]",
+                    "type": "tool_use",
+                }
+            )
+            history.append(
+                {
+                    "role": "tool",
+                    "content": f"[Tool Result: {tool_use_id}]",
+                    "type": "tool_result",
+                }
+            )
 
         history.append({"role": "assistant", "content": response_text})
         await afs.kv.set("conversation:history", history[-100:])
 
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
         await afs.fs.write_file(
             f"/outputs/chat_{timestamp}.json",
-            json.dumps({
-                "timestamp": timestamp,
-                "question": chat_request.message,
-                "answer": response_text,
-            }, indent=2, ensure_ascii=False)
+            json.dumps(
+                {
+                    "timestamp": timestamp,
+                    "question": chat_request.message,
+                    "answer": response_text,
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
         )
 
         import shutil
+
         outputs_root = Path.cwd() / "outputs"
         session_outputs = outputs_root / target_session_id
         session_outputs.mkdir(parents=True, exist_ok=True)
@@ -197,7 +210,7 @@ Exemplo: {outputs_path}/meu_arquivo.txt
         if tmp_outputs.exists():
             for item in tmp_outputs.iterdir():
                 # Validate filename to prevent path traversal attacks
-                if item.is_file() and '..' not in item.name and '/' not in item.name:
+                if item.is_file() and ".." not in item.name and "/" not in item.name:
                     target = session_outputs / item.name
                     shutil.move(str(item), str(target))
 
@@ -214,22 +227,19 @@ Exemplo: {outputs_path}/meu_arquivo.txt
 @router.post("/chat/stream")
 @limiter.limit(RATE_LIMITS.get("chat_stream", "20/minute"))
 async def chat_stream(
-    request: Request,
-    chat_request: ChatRequest,
-    api_key: str = Depends(verify_api_key)
+    request: Request, chat_request: ChatRequest, api_key: str = Depends(verify_api_key)
 ):
     """Chat with streaming response."""
     scan_result = prompt_guard.scan(chat_request.message)
     if not scan_result.is_safe:
         raise HTTPException(
-            status_code=400,
-            detail=f"Message blocked: {scan_result.threat_level.value}"
+            status_code=400, detail=f"Message blocked: {scan_result.threat_level.value}"
         )
 
     r = None
     try:
-        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
         import app_state
+        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
 
         r = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
 
@@ -239,7 +249,7 @@ async def chat_stream(
                 text = response.answer
                 chunk_size = 50
                 for i in range(0, len(text), chunk_size):
-                    chunk = text[i:i+chunk_size]
+                    chunk = text[i : i + chunk_size]
                     yield f"data: {json.dumps({'text': chunk})}\n\n"
                     await asyncio.sleep(0.01)
 
