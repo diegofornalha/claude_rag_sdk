@@ -55,11 +55,27 @@ async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key
     old_session = app_state.current_session_id
     await reset_session()
 
+    # Obter projeto do header ou body
+    project = request.headers.get("X-Client-Project", "chat-simples")
+    try:
+        body = await request.json()
+        project = body.get("project", project)
+    except Exception:
+        pass
+
+    # Armazenar projeto no AgentFS
+    try:
+        agentfs = await app_state.get_agentfs()
+        await agentfs.kv.set("session:project", project)
+    except Exception as e:
+        print(f"[WARN] Could not save project: {e}")
+
     return {
         "status": "ok",
         "message": "New session started!",
         "old_session_id": old_session,
         "new_session_id": app_state.current_session_id,
+        "project": project,
     }
 
 
@@ -94,8 +110,17 @@ async def list_sessions():
                     pass  # File read failed, continue with count=0
 
             session_agentfs = None
+            project = "chat-simples"  # Default
             try:
                 session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
+
+                # Ler projeto armazenado na sessão
+                try:
+                    stored_project = await session_agentfs.kv.get("session:project")
+                    if stored_project:
+                        project = stored_project
+                except Exception:
+                    pass
 
                 if message_count == 0:
                     history = await session_agentfs.kv.get("conversation:history")
@@ -116,7 +141,7 @@ async def list_sessions():
             sessions.append(
                 {
                     "session_id": session_id,
-                    "file": f"chat-simples/{session_id}",
+                    "file": f"{project}/{session_id}",
                     "file_name": session_id,
                     "db_file": str(db_file),
                     "db_size": db_file.stat().st_size,

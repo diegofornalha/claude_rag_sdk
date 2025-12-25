@@ -3,6 +3,8 @@
 import asyncio
 import json
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -10,13 +12,68 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app_state import get_agentfs, get_client
+from app_state import SESSIONS_DIR, get_agentfs, get_client
 from claude_rag_sdk.core.auth import verify_api_key
 from claude_rag_sdk.core.prompt_guard import PromptGuard
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, get_limiter
 from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Chat"])
+
+
+def append_to_jsonl(
+    session_id: str, user_message: str, assistant_response: str, parent_uuid: Optional[str] = None
+):
+    """Append user and assistant messages to a session's JSONL file."""
+    jsonl_file = SESSIONS_DIR / f"{session_id}.jsonl"
+
+    if not jsonl_file.exists():
+        print(f"[WARN] JSONL file not found for session {session_id}")
+        return
+
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    user_uuid = str(uuid.uuid4())
+    assistant_uuid = str(uuid.uuid4())
+
+    # User message entry
+    user_entry = {
+        "parentUuid": parent_uuid,
+        "isSidechain": False,
+        "userType": "external",
+        "cwd": str(Path.cwd() / "outputs"),
+        "sessionId": session_id,
+        "version": "2.0.72",
+        "type": "user",
+        "message": {"role": "user", "content": user_message},
+        "uuid": user_uuid,
+        "timestamp": timestamp,
+    }
+
+    # Assistant message entry
+    assistant_entry = {
+        "parentUuid": user_uuid,
+        "isSidechain": False,
+        "userType": "external",
+        "cwd": str(Path.cwd() / "outputs"),
+        "sessionId": session_id,
+        "version": "2.0.72",
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": assistant_response}],
+        },
+        "uuid": assistant_uuid,
+        "timestamp": timestamp,
+    }
+
+    try:
+        with open(jsonl_file, "a") as f:
+            f.write(json.dumps(user_entry, ensure_ascii=False) + "\n")
+            f.write(json.dumps(assistant_entry, ensure_ascii=False) + "\n")
+        print(f"[JSONL] Appended to {session_id}.jsonl")
+    except Exception as e:
+        print(f"[ERROR] Failed to append to JSONL: {e}")
+
 
 # RAG Knowledge base path (separado do AgentFS para evitar conflitos)
 RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
@@ -214,6 +271,43 @@ Exemplo: {outputs_path}/meu_arquivo.txt
                     target = session_outputs / item.name
                     shutil.move(str(item), str(target))
 
+        # Quando session_id específico é fornecido, escrever no JSONL dessa sessão
+        if chat_request.session_id:
+            append_to_jsonl(
+                session_id=chat_request.session_id,
+                user_message=chat_request.message,
+                assistant_response=response_text,
+            )
+
+            # Limpar sessão temporária que foi criada pelo client
+            # A sessão atual do client não é a mesma que foi solicitada
+            if (
+                app_state.current_session_id
+                and app_state.current_session_id != chat_request.session_id
+            ):
+                temp_session_id = app_state.current_session_id
+                # Deletar arquivos da sessão temporária
+                from app_state import AGENTFS_DIR, SESSIONS_DIR
+
+                for pattern in [
+                    f"{temp_session_id}.db",
+                    f"{temp_session_id}.db-wal",
+                    f"{temp_session_id}.db-shm",
+                ]:
+                    temp_file = AGENTFS_DIR / pattern
+                    if temp_file.exists():
+                        try:
+                            temp_file.unlink()
+                        except Exception:
+                            pass
+                temp_jsonl = SESSIONS_DIR / f"{temp_session_id}.jsonl"
+                if temp_jsonl.exists():
+                    try:
+                        temp_jsonl.unlink()
+                    except Exception:
+                        pass
+                print(f"[INFO] Sessão temporária {temp_session_id} removida")
+
         return ChatResponse(response=response_text)
 
     except Exception as e:
@@ -230,6 +324,8 @@ async def chat_stream(
     request: Request, chat_request: ChatRequest, api_key: str = Depends(verify_api_key)
 ):
     """Chat with streaming response."""
+    from agentfs_sdk import AgentFS, AgentFSOptions
+
     scan_result = prompt_guard.scan(chat_request.message)
     if not scan_result.is_safe:
         raise HTTPException(
@@ -237,17 +333,31 @@ async def chat_stream(
         )
 
     r = None
+    afs = None
     try:
         import app_state
         from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
 
-        r = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
+        # Usar session_id do frontend ou current_session_id
+        target_session_id = chat_request.session_id or app_state.current_session_id or "temp"
+
+        r = await ClaudeRAG.open(ClaudeRAGOptions(id=target_session_id))
+
+        # Abrir AgentFS para salvar histórico
+        afs = await AgentFS.open(AgentFSOptions(id=target_session_id))
 
         async def generate():
+            nonlocal afs
+            full_response = ""
             try:
                 response = await r.query(chat_request.message)
                 text = response.answer
+                full_response = text
                 chunk_size = 50
+
+                # Enviar session_id no primeiro chunk
+                yield f"data: {json.dumps({'session_id': target_session_id})}\n\n"
+
                 for i in range(0, len(text), chunk_size):
                     chunk = text[i : i + chunk_size]
                     yield f"data: {json.dumps({'text': chunk})}\n\n"
@@ -256,11 +366,23 @@ async def chat_stream(
                 if response.citations:
                     yield f"data: {json.dumps({'citations': response.citations})}\n\n"
 
+                # Salvar histórico no AgentFS
+                try:
+                    history = await afs.kv.get("conversation:history") or []
+                    history.append({"role": "user", "content": chat_request.message})
+                    history.append({"role": "assistant", "content": full_response})
+                    await afs.kv.set("conversation:history", history[-100:])
+                    print(f"[STREAM] Histórico salvo: {len(history)} mensagens")
+                except Exception as save_err:
+                    print(f"[WARN] Erro ao salvar histórico: {save_err}")
+
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             finally:
                 await r.close()
+                if afs:
+                    await afs.close()
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -268,4 +390,6 @@ async def chat_stream(
         print(f"[ERROR] Stream error: {e}")
         if r:
             await r.close()
+        if afs:
+            await afs.close()
         raise HTTPException(status_code=500, detail=str(e))
