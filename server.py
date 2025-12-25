@@ -885,10 +885,9 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
     if not sid:
         return {"error": "No active session", "records": []}
 
-    # Verificar se a sessão existe (DB ou pasta de outputs)
+    # Para audit, o DB é OBRIGATÓRIO (agentfs.tools precisa dele)
     session_db = AGENTFS_DIR / f"{sid}.db"
-    session_outputs = Path.cwd() / "outputs" / sid
-    if not session_db.exists() and not session_outputs.exists():
+    if not session_db.exists():
         return {"error": "No active session", "session_id": None, "records": [], "count": 0}
 
     # Get from AgentFS tools
@@ -916,10 +915,9 @@ async def get_audit_stats(session_id: Optional[str] = None):
     if not sid:
         return {"error": "No active session"}
 
-    # Verificar se a sessão existe (DB ou pasta de outputs)
+    # Para audit/stats, o DB é OBRIGATÓRIO (agentfs.tools precisa dele)
     session_db = AGENTFS_DIR / f"{sid}.db"
-    session_outputs = Path.cwd() / "outputs" / sid
-    if not session_db.exists() and not session_outputs.exists():
+    if not session_db.exists():
         return {"error": "No active session", "session_id": None}
 
     afs = await get_agentfs()
