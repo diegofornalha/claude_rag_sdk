@@ -1,0 +1,253 @@
+"""Sessions endpoints."""
+from fastapi import APIRouter, Request, Depends, HTTPException
+from pathlib import Path
+import shutil
+
+from claude_rag_sdk.core.rate_limiter import get_limiter
+from claude_rag_sdk.core.auth import verify_api_key
+
+import app_state
+from app_state import (
+    AGENTFS_DIR,
+    SESSIONS_DIR,
+    get_agentfs,
+    get_current_session_id,
+    reset_session,
+)
+
+router = APIRouter(tags=["Sessions"])
+limiter = get_limiter()
+
+
+@router.get("/session/current")
+async def get_current_session():
+    """Get current session info."""
+    session_id = get_current_session_id()
+
+    if not session_id:
+        return {
+            "active": False,
+            "session_id": None,
+            "message": "No active session"
+        }
+
+    session_db = AGENTFS_DIR / f"{session_id}.db"
+    session_outputs = Path.cwd() / "outputs" / session_id
+
+    if not session_db.exists() and not session_outputs.exists():
+        return {
+            "active": False,
+            "session_id": None,
+            "message": "No active session"
+        }
+
+    session_info = None
+    output_files = []
+    if app_state.agentfs:
+        try:
+            session_info = await app_state.agentfs.kv.get("session:info")
+            output_files = await app_state.agentfs.fs.readdir("/outputs")
+        except:
+            pass
+
+    return {
+        "active": True,
+        "session_id": session_id,
+        "info": session_info,
+        "has_outputs": len(output_files) > 0,
+        "output_count": len(output_files),
+        "outputs": output_files[:10],
+    }
+
+
+@router.post("/reset")
+@limiter.limit("5/minute")
+async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key)):
+    """Start new session."""
+    old_session = app_state.current_session_id
+    await reset_session()
+
+    return {
+        "status": "ok",
+        "message": "New session started!",
+        "old_session_id": old_session,
+        "new_session_id": app_state.current_session_id
+    }
+
+
+@router.get("/sessions")
+async def list_sessions():
+    """List all sessions (AgentFS + old JSONL sessions)."""
+    from agentfs_sdk import AgentFS, AgentFSOptions
+    sessions = []
+
+    if AGENTFS_DIR.exists():
+        db_files = list(AGENTFS_DIR.glob("*.db"))
+        db_files = [f for f in db_files if not f.name.endswith(('-wal', '-shm', '.db-wal', '.db-shm'))]
+
+        for db_file in sorted(db_files, key=lambda f: f.stat().st_mtime, reverse=True):
+            session_id = db_file.stem
+
+            if session_id.endswith("_rag"):
+                session_id = session_id[:-4]
+
+            message_count = 0
+            output_count = 0
+
+            jsonl_file = SESSIONS_DIR / f"{session_id}.jsonl"
+            if jsonl_file.exists():
+                try:
+                    with open(jsonl_file, 'r') as f:
+                        message_count = len(f.readlines())
+                except:
+                    pass
+
+            try:
+                session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
+
+                if message_count == 0:
+                    history = await session_agentfs.kv.get("conversation:history")
+                    if history:
+                        message_count = len(history)
+
+                try:
+                    outputs = await session_agentfs.fs.readdir("/outputs")
+                    output_count = len(outputs) if outputs else 0
+                except:
+                    output_count = 0
+
+                await session_agentfs.close()
+            except Exception as e:
+                print(f"[WARN] Could not read session {session_id}: {e}")
+
+            sessions.append({
+                "session_id": session_id,
+                "file": f"chat-simples/{session_id}",
+                "file_name": session_id,
+                "db_file": str(db_file),
+                "db_size": db_file.stat().st_size,
+                "updated_at": db_file.stat().st_mtime * 1000,
+                "is_current": session_id == app_state.current_session_id,
+                "message_count": message_count,
+                "has_outputs": output_count > 0,
+                "output_count": output_count,
+                "model": "claude-haiku-4-5",
+            })
+
+    if SESSIONS_DIR.exists():
+        for jsonl_file in sorted(SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True):
+            session_id = jsonl_file.stem
+
+            message_count = 0
+            try:
+                with open(jsonl_file, 'r') as f:
+                    message_count = len(f.readlines())
+            except:
+                pass
+
+            sessions.append({
+                "session_id": session_id,
+                "file": f"backend/{jsonl_file.name}",
+                "file_name": jsonl_file.name,
+                "db_file": str(jsonl_file),
+                "db_size": jsonl_file.stat().st_size,
+                "updated_at": jsonl_file.stat().st_mtime * 1000,
+                "is_current": False,
+                "message_count": message_count,
+                "has_outputs": False,
+                "output_count": 0,
+                "model": "claude-haiku-4-5",
+            })
+
+    sessions.sort(key=lambda s: s['updated_at'], reverse=True)
+    return {"count": len(sessions), "sessions": sessions}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session (AgentFS or legacy JSONL)."""
+    if session_id == app_state.current_session_id:
+        return {"success": False, "error": "Cannot delete active session"}
+
+    deleted = []
+
+    for pattern in [f"{session_id}.db", f"{session_id}.db-wal", f"{session_id}.db-shm", f"{session_id}_rag.db"]:
+        f = AGENTFS_DIR / pattern
+        if f.exists():
+            f.unlink()
+            deleted.append(str(f))
+
+    audit_file = AGENTFS_DIR / "audit" / f"{session_id}.jsonl"
+    if audit_file.exists():
+        audit_file.unlink()
+        deleted.append(str(audit_file))
+
+    old_sessions_dirs = [
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+    ]
+    for old_dir in old_sessions_dirs:
+        jsonl_file = old_dir / f"{session_id}.jsonl"
+        if jsonl_file.exists():
+            jsonl_file.unlink()
+            deleted.append(str(jsonl_file))
+
+    outputs_dir = Path.cwd() / "outputs" / session_id
+    if outputs_dir.exists() and outputs_dir.is_dir():
+        shutil.rmtree(outputs_dir)
+        deleted.append(str(outputs_dir))
+
+    return {"success": True, "deleted": deleted}
+
+
+@router.get("/sessions/{session_id}")
+async def get_session_details(session_id: str):
+    """Get session details with messages."""
+    return await get_session_messages(session_id)
+
+
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """Get messages from a session (supports both AgentFS and legacy JSONL)."""
+    import json
+
+    old_sessions_dirs = [
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
+        Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+    ]
+
+    jsonl_file = None
+    for old_dir in old_sessions_dirs:
+        candidate = old_dir / f"{session_id}.jsonl"
+        if candidate.exists():
+            jsonl_file = candidate
+            break
+
+    if jsonl_file:
+        messages = []
+        try:
+            with open(jsonl_file, 'r') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                        if entry.get('type') in ['user', 'assistant']:
+                            msg = entry.get('message', {})
+                            messages.append({
+                                'role': msg.get('role'),
+                                'content': msg.get('content'),
+                                'timestamp': entry.get('timestamp'),
+                            })
+                    except:
+                        continue
+            return {"messages": messages, "count": len(messages), "type": "jsonl"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    if app_state.agentfs and app_state.current_session_id == session_id:
+        try:
+            history = await app_state.agentfs.kv.get("conversation:history") or []
+            return {"messages": history, "count": len(history), "type": "agentfs"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    raise HTTPException(status_code=404, detail="Session not found")
