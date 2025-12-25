@@ -39,6 +39,14 @@ async def lifespan(app: FastAPI):
     """Manage app lifecycle."""
     print("[INFO] Starting Chat Simples...")
     yield
+    # Cleanup watcher before app_state
+    try:
+        from utils.file_watcher import get_watcher
+        watcher = get_watcher()
+        if watcher.is_active():
+            watcher.stop()
+    except Exception as e:
+        print(f"[WARN] Error stopping watcher: {e}")
     await app_state.cleanup()
 
 
@@ -100,7 +108,13 @@ async def root():
         "message": "Chat Simples v3 - Claude RAG SDK",
         "auth_enabled": is_auth_enabled()
     }
-    # API keys nunca são expostas - use variáveis de ambiente
+
+    # Em desenvolvimento, expor dev key para facilitar testes
+    if env == "development" and is_auth_enabled():
+        from claude_rag_sdk.core.auth import VALID_API_KEYS
+        if VALID_API_KEYS:
+            response["dev_key"] = list(VALID_API_KEYS)[0]
+
     return response
 
 

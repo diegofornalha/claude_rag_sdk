@@ -157,17 +157,75 @@ def get_file_hash(file_path: Path) -> str:
     return hashlib.md5(file_path.read_bytes()).hexdigest()
 
 
-def filter_modified_files(files: list[tuple[Path, str]], cache: dict) -> list[tuple[Path, str]]:
-    """Filtra apenas arquivos novos ou modificados."""
+def filter_modified_files(files: list[tuple[Path, str]], cache: dict, existing_sources: set = None) -> list[tuple[Path, str]]:
+    """Filtra apenas arquivos novos ou modificados.
+
+    Args:
+        files: Lista de (Path, source)
+        cache: Cache de hashes
+        existing_sources: Set de sources que já existem no RAG (opcional)
+    """
     modified = []
     for file_path, source in files:
         file_hash = get_file_hash(file_path)
         cached_hash = cache.get(str(file_path))
 
+        # Arquivo novo ou modificado
         if cached_hash != file_hash:
             modified.append((file_path, source))
+        # Arquivo no cache mas não no RAG (foi deletado via UI)
+        elif existing_sources is not None and source not in existing_sources:
+            modified.append((file_path, source))
+            print(f"🔄 Detectado deletado via UI: {source}")
 
     return modified
+
+
+async def cleanup_deleted_files(engine: IngestEngine, current_files: list[tuple[Path, str]], cache: dict) -> int:
+    """Remove documentos do RAG cujos arquivos foram deletados."""
+    # Criar set de paths atuais
+    current_paths = {str(f[0]) for f in current_files}
+
+    # Identificar arquivos no cache que não existem mais
+    deleted_paths = [path for path in cache.keys() if path not in current_paths]
+
+    if not deleted_paths:
+        return 0
+
+    # Buscar documentos no RAG para deletar
+    deleted_count = 0
+    for deleted_path in deleted_paths:
+        # Buscar documento por metadata (file_path)
+        rel_path = Path(deleted_path).relative_to(BACKEND_PATH) if Path(deleted_path).is_absolute() else Path(deleted_path)
+        source_prefix = f"Backend - {rel_path}"
+
+        # Tentar deletar via source name matching
+        try:
+            from claude_rag_sdk.search import SearchEngine
+            search = SearchEngine(db_path=str(BACKEND_PATH / "data" / "rag_knowledge.db"))
+
+            # Buscar por source exato
+            import sqlite3
+            conn = sqlite3.connect(str(BACKEND_PATH / "data" / "rag_knowledge.db"))
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT id FROM documentos WHERE nome LIKE ?", (f"%{rel_path}%",))
+            docs_to_delete = [row[0] for row in cursor.fetchall()]
+
+            for doc_id in docs_to_delete:
+                await engine.delete_document(doc_id)
+                deleted_count += 1
+                print(f"🗑️  Removido: {rel_path}")
+
+            conn.close()
+
+            # Remover do cache
+            del cache[deleted_path]
+
+        except Exception as e:
+            print(f"⚠️  Erro ao remover {rel_path}: {e}")
+
+    return deleted_count
 
 
 async def main():
@@ -190,9 +248,42 @@ async def main():
     # Carregar cache
     cache = load_cache()
 
+    # Criar engine para cleanup
+    engine = IngestEngine(
+        db_path=str(db_path),
+        embedding_model="BAAI/bge-small-en-v1.5",
+        chunk_size=1500,
+        chunk_overlap=150,
+        chunking_strategy=ChunkingStrategy.PARAGRAPH,
+    )
+
+    # Cleanup de arquivos deletados (exceto em modo full)
+    if not full_mode and cache:
+        deleted_count = await cleanup_deleted_files(engine, all_files, cache)
+        if deleted_count > 0:
+            print(f"🗑️  {deleted_count} documento(s) removido(s) (arquivos deletados)")
+            print()
+
+    # Buscar sources existentes no RAG para detectar deleções via UI
+    existing_sources = set()
+    if not full_mode:
+        try:
+            sources_list = await engine.search_engine.list_sources() if hasattr(engine, 'search_engine') else []
+            if not sources_list:
+                # Buscar diretamente do banco
+                import sqlite3
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                existing_sources = {row[0] for row in cursor.execute("SELECT nome FROM documentos")}
+                conn.close()
+            else:
+                existing_sources = {s['nome'] for s in sources_list}
+        except Exception as e:
+            print(f"⚠️  Não foi possível verificar sources existentes: {e}")
+
     if stats_only:
         # Apenas mostrar estatísticas
-        modified = filter_modified_files(all_files, cache)
+        modified = filter_modified_files(all_files, cache, existing_sources)
         print(f"\n📊 Status:")
         print(f"   - Arquivos no cache: {len(cache)}")
         print(f"   - Arquivos modificados/novos: {len(modified)}")
@@ -210,23 +301,17 @@ async def main():
         files_to_process = all_files
         cache = {}  # Reset cache
     else:
-        files_to_process = filter_modified_files(all_files, cache)
-        if not files_to_process:
+        files_to_process = filter_modified_files(all_files, cache, existing_sources)
+        has_deletions = any(path not in {str(f[0]) for f in all_files} for path in cache.keys())
+
+        if not files_to_process and not has_deletions:
             print(f"\n✅ Nenhum arquivo modificado. Base está atualizada!")
             return
-        print(f"🔄 Modo INCREMENTAL: {len(files_to_process)} arquivos novos/modificados")
+
+        if files_to_process:
+            print(f"🔄 Modo INCREMENTAL: {len(files_to_process)} arquivos novos/modificados")
 
     print()
-
-    # Criar engine de ingestão
-    # chunk_size maior (1500) para ter mais contexto de código no RAG
-    engine = IngestEngine(
-        db_path=str(db_path),
-        embedding_model="BAAI/bge-small-en-v1.5",
-        chunk_size=1500,
-        chunk_overlap=150,
-        chunking_strategy=ChunkingStrategy.PARAGRAPH,
-    )
 
     # Ingerir cada arquivo
     success_count = 0

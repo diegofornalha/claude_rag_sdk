@@ -9,6 +9,9 @@ import app_state
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
+# Import watcher utilities
+from utils.file_watcher import get_watcher
+
 # RAG Knowledge base path
 RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
 
@@ -191,6 +194,45 @@ async def rag_config():
         "chunk_size": 500,
         "chunk_overlap": 50
     }
+
+
+@router.get("/watcher/status")
+async def watcher_status():
+    """Get file watcher status."""
+    watcher = get_watcher()
+    return watcher.get_status()
+
+
+@router.post("/watcher/start")
+async def watcher_start(api_key: str = Depends(verify_api_key)):
+    """Start automatic file watching and reindexing."""
+    watcher = get_watcher()
+    try:
+        watcher.start()
+        return {
+            "success": True,
+            "message": "File watcher started",
+            "status": watcher.get_status()
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to start watcher: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start watcher: {str(e)}")
+
+
+@router.post("/watcher/stop")
+async def watcher_stop(api_key: str = Depends(verify_api_key)):
+    """Stop automatic file watching."""
+    watcher = get_watcher()
+    try:
+        watcher.stop()
+        return {
+            "success": True,
+            "message": "File watcher stopped",
+            "status": watcher.get_status()
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to stop watcher: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to stop watcher: {str(e)}")
 
 
 @router.delete("/reset")
