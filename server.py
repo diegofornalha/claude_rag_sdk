@@ -512,10 +512,13 @@ async def get_current_session():
             "message": "No active session"
         }
 
-    # Verificar se a sessão ainda existe no banco de dados
+    # Verificar se a sessão existe (DB ou pasta de outputs)
     session_db = AGENTFS_DIR / f"{session_id}.db"
-    if not session_db.exists():
-        # Sessão foi deletada, retornar como inativa
+    session_outputs = Path.cwd() / "outputs" / session_id
+
+    # Considera sessão ativa se tiver DB OU pasta de outputs
+    if not session_db.exists() and not session_outputs.exists():
+        # Sessão foi completamente deletada, retornar como inativa
         return {
             "active": False,
             "session_id": None,
@@ -882,9 +885,10 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
     if not sid:
         return {"error": "No active session", "records": []}
 
-    # Verificar se a sessão ainda existe
+    # Verificar se a sessão existe (DB ou pasta de outputs)
     session_db = AGENTFS_DIR / f"{sid}.db"
-    if not session_db.exists():
+    session_outputs = Path.cwd() / "outputs" / sid
+    if not session_db.exists() and not session_outputs.exists():
         return {"error": "No active session", "session_id": None, "records": [], "count": 0}
 
     # Get from AgentFS tools
@@ -912,9 +916,10 @@ async def get_audit_stats(session_id: Optional[str] = None):
     if not sid:
         return {"error": "No active session"}
 
-    # Verificar se a sessão ainda existe
+    # Verificar se a sessão existe (DB ou pasta de outputs)
     session_db = AGENTFS_DIR / f"{sid}.db"
-    if not session_db.exists():
+    session_outputs = Path.cwd() / "outputs" / sid
+    if not session_db.exists() and not session_outputs.exists():
         return {"error": "No active session", "session_id": None}
 
     afs = await get_agentfs()
