@@ -136,6 +136,15 @@ def collect_backend_files() -> list[tuple[Path, str]]:
             rel_path = py_file.relative_to(BACKEND_PATH)
             files.append((py_file, f"Backend - {rel_path}"))
 
+    # AgentFS SDK (submodule)
+    agentfs_path = BACKEND_PATH / "agentfs"
+    if agentfs_path.exists():
+        for py_file in agentfs_path.rglob("*.py"):
+            if should_ignore(py_file):
+                continue
+            rel_path = py_file.relative_to(BACKEND_PATH)
+            files.append((py_file, f"Backend - {rel_path}"))
+
     return files
 
 
