@@ -43,7 +43,8 @@ async def get_filesystem_tree(path: str = "/"):
             "session_id": app_state.current_session_id,
         }
     except Exception as e:
-        return {"error": str(e)}
+        print(f"[ERROR] Failed to read tree: {e}")
+        return {"error": "Failed to read filesystem tree"}
 
 
 @router.get("/kv/list")
@@ -55,7 +56,8 @@ async def list_kv(prefix: str = ""):
         keys = await afs.kv.list(prefix=prefix if prefix else None)
         return {"keys": keys, "count": len(keys)}
     except Exception as e:
-        return {"keys": [], "error": str(e)}
+        print(f"[ERROR] Failed to list KV keys: {e}")
+        return {"keys": [], "error": "Failed to list keys"}
 
 
 @router.get("/kv/{key}")

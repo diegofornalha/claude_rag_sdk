@@ -38,7 +38,8 @@ async def list_outputs(directory: str = "outputs", session_id: str = None):
             "session_id": session_id,
         }
     except Exception as e:
-        return {"files": [], "error": str(e), "session_id": session_id}
+        print(f"[ERROR] Failed to list outputs: {e}")
+        return {"files": [], "error": "Failed to list outputs", "session_id": session_id}
 
 
 @router.get("/file/{filename:path}")
@@ -55,7 +56,8 @@ async def get_output_file(filename: str):
             "session_id": app_state.current_session_id,
         }
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"File not found: {e}")
+        print(f"[ERROR] Failed to read file {filename}: {e}")
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 @router.post("/write")
@@ -72,7 +74,8 @@ async def write_output_file(filename: str, content: str, directory: str = "/outp
             "session_id": app_state.current_session_id,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] Failed to write file {filename}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to write file")
 
 
 @router.delete("/{filename:path}")
@@ -84,4 +87,5 @@ async def delete_output(filename: str):
         await afs.fs.unlink(filepath)
         return {"success": True, "deleted": filepath}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print(f"[ERROR] Failed to delete file {filename}: {e}")
+        return {"success": False, "error": "Failed to delete file"}

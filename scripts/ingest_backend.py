@@ -206,18 +206,16 @@ async def cleanup_deleted_files(engine: IngestEngine, current_files: list[tuple[
 
             # Buscar por source exato
             import sqlite3
-            conn = sqlite3.connect(str(BACKEND_PATH / "data" / "rag_knowledge.db"))
-            cursor = conn.cursor()
+            with sqlite3.connect(str(BACKEND_PATH / "data" / "rag_knowledge.db")) as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("SELECT id FROM documentos WHERE nome LIKE ?", (f"%{rel_path}%",))
-            docs_to_delete = [row[0] for row in cursor.fetchall()]
+                cursor.execute("SELECT id FROM documentos WHERE nome LIKE ?", (f"%{rel_path}%",))
+                docs_to_delete = [row[0] for row in cursor.fetchall()]
 
-            for doc_id in docs_to_delete:
-                await engine.delete_document(doc_id)
-                deleted_count += 1
-                print(f"🗑️  Removido: {rel_path}")
-
-            conn.close()
+                for doc_id in docs_to_delete:
+                    await engine.delete_document(doc_id)
+                    deleted_count += 1
+                    print(f"🗑️  Removido: {rel_path}")
 
             # Remover do cache
             del cache[deleted_path]

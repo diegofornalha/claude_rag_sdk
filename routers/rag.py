@@ -342,7 +342,8 @@ async def list_documents(limit: int = 50, offset: int = 0):
             }
 
     except Exception as e:
-        return {"documents": [], "total": 0, "error": str(e)}
+        print(f"[ERROR] Failed to list documents: {e}")
+        return {"documents": [], "total": 0, "error": "Failed to list documents"}
 
 
 @router.get("/documents/{doc_id}")

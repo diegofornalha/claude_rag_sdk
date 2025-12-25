@@ -62,8 +62,9 @@ async def search_rag_context(query: str, top_k: int = 3) -> str:
 
         return "\n\n---\n\n".join(context_parts)
     except Exception as e:
-        print(f"[WARN] RAG search error: {e}")
-        return ""
+        print(f"[ERROR] RAG search failed: {e}")
+        # Retornar mensagem de erro para o usuário saber que RAG falhou
+        return "[AVISO: Busca na base de conhecimento falhou - respondendo sem contexto RAG]"
 
 
 class ChatRequest(BaseModel):
@@ -240,6 +241,7 @@ async def chat_stream(
             detail=f"Message blocked: {scan_result.threat_level.value}"
         )
 
+    r = None
     try:
         from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
         import app_state
@@ -269,4 +271,6 @@ async def chat_stream(
 
     except Exception as e:
         print(f"[ERROR] Stream error: {e}")
+        if r:
+            await r.close()
         raise HTTPException(status_code=500, detail=str(e))

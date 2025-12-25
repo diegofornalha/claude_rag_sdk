@@ -82,10 +82,10 @@ async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
     """
     global client, agentfs, current_session_id, current_model
 
-    requested_model = model or current_model
+    requested_model = (model or current_model).lower()  # Normalize case
 
     # Verificar se modelo mudou - se sim, criar NOVA sessão
-    if client is not None and requested_model != current_model:
+    if client is not None and requested_model != current_model.lower():
         print(f"[INFO] Modelo mudou: {current_model} -> {requested_model}, criando nova sessão...")
         # Don't try to close client - causes RuntimeError due to task scope issues
         client = None

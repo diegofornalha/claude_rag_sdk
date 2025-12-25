@@ -52,7 +52,7 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
         }
     except Exception as e:
         print(f"[AUDIT] Error getting tools for {sid}: {e}")
-        return {"session_id": sid, "records": [], "count": 0, "error": str(e)}
+        return {"session_id": sid, "records": [], "count": 0, "error": "Failed to get tool records"}
     finally:
         if session_afs:
             await session_afs.close()
@@ -84,7 +84,7 @@ async def get_audit_stats(session_id: Optional[str] = None):
         }
     except Exception as e:
         print(f"[AUDIT] Error getting stats for {sid}: {e}")
-        return {"session_id": sid, "total_calls": 0, "by_tool": {}, "error": str(e)}
+        return {"session_id": sid, "total_calls": 0, "by_tool": {}, "error": "Failed to get statistics"}
     finally:
         if session_afs:
             await session_afs.close()
