@@ -346,7 +346,7 @@ async def chat(
         )
 
     try:
-        from claude_agent_sdk import AssistantMessage, TextBlock
+        from claude_agent_sdk import AssistantMessage, TextBlock, ToolUseBlock, ToolResultBlock
 
         c = await get_client()
         afs = await get_agentfs()
@@ -354,16 +354,48 @@ async def chat(
         # Track the query
         call_id = await afs.tools.start("chat", {"message": chat_request.message[:100]})
 
-        # Query with ClaudeSDKClient
-        await c.query(chat_request.message)
+        # Incluir session_id como contexto para o LLM saber onde salvar arquivos
+        outputs_path = str(Path.cwd() / "outputs" / current_session_id)
+        context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {current_session_id}]
+Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
+Exemplo: {outputs_path}/meu_arquivo.txt
 
-        # Collect response
+[MENSAGEM DO USUÁRIO]
+{chat_request.message}"""
+
+        # Query with ClaudeSDKClient
+        await c.query(context_message)
+
+        # Collect response and track tool calls
         response_text = ""
+        tool_calls = {}  # tool_use_id -> call_id for tracking
+
         async for message in c.receive_response():
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         response_text += block.text
+                    elif isinstance(block, ToolUseBlock):
+                        # Registrar início da tool call
+                        tool_call_id = await afs.tools.start(
+                            block.name,
+                            {"input": str(block.input)[:500]}  # Limitar tamanho
+                        )
+                        tool_calls[block.id] = tool_call_id
+                        print(f"🔧 Tool call: {block.name} (id: {block.id})")
+                    elif isinstance(block, ToolResultBlock):
+                        # Registrar resultado da tool call
+                        if block.tool_use_id in tool_calls:
+                            await afs.tools.success(
+                                tool_calls[block.tool_use_id],
+                                {"result": str(block.content)[:500]}
+                            )
+                            print(f"✅ Tool result: {block.tool_use_id}")
+
+        # Complete pending tool calls (ToolResultBlock é processado internamente pelo SDK)
+        for tool_use_id, tool_call_id in tool_calls.items():
+            await afs.tools.success(tool_call_id, {"status": "completed_by_sdk"})
+            print(f"✅ Tool completed: {tool_use_id}")
 
         # Complete tracking
         await afs.tools.success(call_id, {"response_length": len(response_text)})
@@ -391,10 +423,9 @@ async def chat(
             }, indent=2, ensure_ascii=False)
         )
 
-        # Organize outputs: move files from root to session folder
+        # Organize outputs: move files from various locations to session folder
         import shutil
         outputs_root = Path.cwd() / "outputs"
-        tmp_outputs = Path("/tmp/outputs")
         session_outputs = outputs_root / current_session_id
 
         # Create session folder if it doesn't exist
@@ -407,10 +438,22 @@ async def chat(
                     target = session_outputs / item.name
                     shutil.move(str(item), str(target))
 
+        # Move files from default folders (default, default_session) to session folder
+        for default_folder in ["default", "default_session"]:
+            default_path = outputs_root / default_folder
+            if default_path.exists() and default_path.is_dir():
+                for item in default_path.iterdir():
+                    if item.is_file():
+                        target = session_outputs / item.name
+                        if not target.exists():  # Avoid overwriting
+                            shutil.move(str(item), str(target))
+                            print(f"📦 Moved {item.name} from {default_folder}/ to {current_session_id}/")
+
         # Also check and move files from /tmp/outputs
+        tmp_outputs = Path("/tmp/outputs")
         if tmp_outputs.exists():
             for item in tmp_outputs.iterdir():
-                if item.is_file():  # Only move files, not directories
+                if item.is_file():
                     target = session_outputs / item.name
                     shutil.move(str(item), str(target))
 
@@ -917,6 +960,8 @@ async def get_filesystem_tree(path: str = "/"):
 @app.get("/audit/tools")
 async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
     """Get tool call history."""
+    from agentfs_sdk import AgentFS, AgentFSOptions
+
     sid = session_id or get_current_session_id()
     if not sid:
         return {"error": "No active session", "records": []}
@@ -926,27 +971,47 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
     if not session_db.exists():
         return {"error": "No active session", "session_id": None, "records": [], "count": 0}
 
-    # Get from AgentFS tools
-    afs = await get_agentfs()
-    if afs:
-        try:
-            stats = await afs.tools.get_stats()
-            recent = await afs.tools.get_recent(limit=limit)
-            return {
-                "session_id": sid,
-                "stats": [{"name": s.name, "calls": s.total_calls, "avg_ms": s.avg_duration_ms} for s in stats],
-                "recent": recent[:limit],
-                "count": len(recent),
-            }
-        except:
-            pass
+    # Abrir AgentFS específico para a sessão solicitada
+    try:
+        session_afs = await AgentFS.open(AgentFSOptions(id=sid))
+        stats = await session_afs.tools.get_stats()
 
-    return {"session_id": sid, "records": [], "count": 0}
+        # get_recent requer timestamp 'since' - buscar últimas 24h
+        since_timestamp = int(time.time()) - 86400  # 24 horas atrás
+        recent = await session_afs.tools.get_recent(since=since_timestamp, limit=limit)
+        await session_afs.close()
+
+        # Converter ToolCall objects para dicts serializáveis
+        recent_dicts = []
+        for call in recent[:limit]:
+            recent_dicts.append({
+                "id": call.id,
+                "name": call.name,
+                "started_at": call.started_at,
+                "completed_at": call.completed_at,
+                "duration_ms": call.duration_ms,
+                "status": call.status,
+                "parameters": call.parameters,
+                "result": call.result,
+                "error": call.error,
+            })
+
+        return {
+            "session_id": sid,
+            "stats": [{"name": s.name, "calls": s.total_calls, "avg_ms": s.avg_duration_ms} for s in stats],
+            "recent": recent_dicts,
+            "count": len(recent_dicts),
+        }
+    except Exception as e:
+        print(f"[AUDIT] Error getting tools for {sid}: {e}")
+        return {"session_id": sid, "records": [], "count": 0, "error": str(e)}
 
 
 @app.get("/audit/stats")
 async def get_audit_stats(session_id: Optional[str] = None):
     """Get audit statistics."""
+    from agentfs_sdk import AgentFS, AgentFSOptions
+
     sid = session_id or get_current_session_id()
     if not sid:
         return {"error": "No active session"}
@@ -956,20 +1021,21 @@ async def get_audit_stats(session_id: Optional[str] = None):
     if not session_db.exists():
         return {"error": "No active session", "session_id": None}
 
-    afs = await get_agentfs()
-    if afs:
-        try:
-            stats = await afs.tools.get_stats()
-            return {
-                "session_id": sid,
-                "total_calls": sum(s.total_calls for s in stats),
-                "by_tool": {s.name: s.total_calls for s in stats},
-                "avg_duration_ms": sum(s.avg_duration_ms for s in stats) / len(stats) if stats else 0,
-            }
-        except:
-            pass
+    # Abrir AgentFS específico para a sessão solicitada
+    try:
+        session_afs = await AgentFS.open(AgentFSOptions(id=sid))
+        stats = await session_afs.tools.get_stats()
+        await session_afs.close()
 
-    return {"session_id": sid, "total_calls": 0, "by_tool": {}}
+        return {
+            "session_id": sid,
+            "total_calls": sum(s.total_calls for s in stats),
+            "by_tool": {s.name: s.total_calls for s in stats},
+            "avg_duration_ms": sum(s.avg_duration_ms for s in stats) / len(stats) if stats else 0,
+        }
+    except Exception as e:
+        print(f"[AUDIT] Error getting stats for {sid}: {e}")
+        return {"session_id": sid, "total_calls": 0, "by_tool": {}, "error": str(e)}
 
 
 # =============================================================================
