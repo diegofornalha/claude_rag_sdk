@@ -270,10 +270,9 @@ async def main():
             if not sources_list:
                 # Buscar diretamente do banco
                 import sqlite3
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
-                existing_sources = {row[0] for row in cursor.execute("SELECT nome FROM documentos")}
-                conn.close()
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    existing_sources = {row[0] for row in cursor.execute("SELECT nome FROM documentos")}
             else:
                 existing_sources = {s['nome'] for s in sources_list}
         except Exception as e:
