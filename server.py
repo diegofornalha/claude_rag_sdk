@@ -512,6 +512,16 @@ async def get_current_session():
             "message": "No active session"
         }
 
+    # Verificar se a sessão ainda existe no banco de dados
+    session_db = AGENTFS_DIR / f"{session_id}.db"
+    if not session_db.exists():
+        # Sessão foi deletada, retornar como inativa
+        return {
+            "active": False,
+            "session_id": None,
+            "message": "No active session"
+        }
+
     # Get session info from KV
     session_info = None
     output_files = []
@@ -872,6 +882,11 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
     if not sid:
         return {"error": "No active session", "records": []}
 
+    # Verificar se a sessão ainda existe
+    session_db = AGENTFS_DIR / f"{sid}.db"
+    if not session_db.exists():
+        return {"error": "No active session", "session_id": None, "records": [], "count": 0}
+
     # Get from AgentFS tools
     afs = await get_agentfs()
     if afs:
@@ -896,6 +911,11 @@ async def get_audit_stats(session_id: Optional[str] = None):
     sid = session_id or get_current_session_id()
     if not sid:
         return {"error": "No active session"}
+
+    # Verificar se a sessão ainda existe
+    session_db = AGENTFS_DIR / f"{sid}.db"
+    if not session_db.exists():
+        return {"error": "No active session", "session_id": None}
 
     afs = await get_agentfs()
     if afs:
