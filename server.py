@@ -36,7 +36,7 @@ from claude_rag_sdk.core.auth import verify_api_key, is_auth_enabled
 # CONFIGURATION
 # =============================================================================
 
-AGENTFS_DIR = Path.home() / ".claude" / ".agentfs"
+AGENTFS_DIR = Path.cwd() / ".agentfs"
 
 # Global client and AgentFS instances
 client: Optional["ClaudeSDKClient"] = None
@@ -84,13 +84,46 @@ async def get_client() -> "ClaudeSDKClient":
     """Get ClaudeSDKClient instance (manages sessions automatically)."""
     global client, agentfs, current_session_id
 
+    # Verificar se sessão atual ainda existe, se não, resetar
+    if client is not None and current_session_id:
+        session_db = AGENTFS_DIR / f"{current_session_id}.db"
+        if not session_db.exists():
+            print(f"⚠️ Sessão {current_session_id} foi deletada, resetando...")
+            if client is not None:
+                await client.__aexit__(None, None, None)
+                client = None
+            if agentfs is not None:
+                await agentfs.close()
+                agentfs = None
+            current_session_id = None
+
     if client is None:
         # Build options using AgentEngine helper
         from claude_rag_sdk.agent import AgentEngine
         from claude_rag_sdk import ClaudeRAGOptions
         from claude_agent_sdk import ClaudeSDKClient
 
-        temp_options = ClaudeRAGOptions(id="temp", agent_model=AgentModel.HAIKU)
+        # System prompt para instruir o agente sobre onde salvar arquivos
+        # O session_id será inserido dinamicamente quando disponível
+        outputs_base = str(Path.cwd() / "outputs")
+        system_prompt = f"""Você é um assistente RAG especializado em responder perguntas usando uma base de conhecimento.
+
+## Regras para criação de arquivos:
+- SEMPRE salve arquivos em: {outputs_base}/[SESSION_ID]/
+- Substitua [SESSION_ID] pelo ID da sessão atual
+- Use nomes descritivos e extensões apropriadas (ex: relatorio.txt, dados.json)
+- NUNCA use /tmp/ ou outros diretórios
+- Confirme ao usuário o caminho completo do arquivo criado
+
+## Importante:
+- Responda com base nos documentos da base de conhecimento
+- Forneça citações com fonte e trecho quando aplicável"""
+
+        temp_options = ClaudeRAGOptions(
+            id="temp",
+            agent_model=AgentModel.HAIKU,
+            system_prompt=system_prompt
+        )
         engine = AgentEngine(options=temp_options, mcp_server_path=None)
         client_options = engine._get_agent_options()
 
@@ -569,8 +602,11 @@ async def list_sessions():
 
     # 1. List AgentFS sessions (new system)
     if AGENTFS_DIR.exists():
-        # Get RAG session DBs (chat-*_rag.db)
-        for db_file in sorted(AGENTFS_DIR.glob("chat-*_rag.db"), key=lambda f: f.stat().st_mtime, reverse=True):
+        # Get all session DBs (UUID.db or chat-*_rag.db)
+        db_files = list(AGENTFS_DIR.glob("*.db"))
+        # Filter out WAL and SHM files, and only keep main DB files
+        db_files = [f for f in db_files if not f.name.endswith(('-wal', '-shm', '.db-wal', '.db-shm'))]
+        for db_file in sorted(db_files, key=lambda f: f.stat().st_mtime, reverse=True):
             session_id = db_file.stem
 
             # Remove _rag suffix from session_id for display
