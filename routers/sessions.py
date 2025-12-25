@@ -92,7 +92,16 @@ async def list_sessions():
             f for f in db_files if not f.name.endswith(("-wal", "-shm", ".db-wal", ".db-shm"))
         ]
 
-        for db_file in sorted(db_files, key=lambda f: f.stat().st_mtime, reverse=True):
+        # Filtrar arquivos que ainda existem (podem ter sido deletados)
+        valid_db_files = []
+        for f in db_files:
+            try:
+                f.stat()  # Verifica se existe
+                valid_db_files.append(f)
+            except FileNotFoundError:
+                continue
+
+        for db_file in valid_db_files:
             session_id = db_file.stem
 
             if session_id.endswith("_rag"):
@@ -138,50 +147,64 @@ async def list_sessions():
                 if session_agentfs:
                     await session_agentfs.close()
 
-            sessions.append(
-                {
-                    "session_id": session_id,
-                    "file": f"{project}/{session_id}",
-                    "file_name": session_id,
-                    "db_file": str(db_file),
-                    "db_size": db_file.stat().st_size,
-                    "updated_at": db_file.stat().st_mtime * 1000,
-                    "is_current": session_id == app_state.current_session_id,
-                    "message_count": message_count,
-                    "has_outputs": output_count > 0,
-                    "output_count": output_count,
-                    "model": "claude-haiku-4-5",
-                }
-            )
+            # Verificar se arquivo ainda existe (pode ter sido deletado durante a listagem)
+            try:
+                db_stat = db_file.stat()
+                sessions.append(
+                    {
+                        "session_id": session_id,
+                        "file": f"{project}/{session_id}",
+                        "file_name": session_id,
+                        "db_file": str(db_file),
+                        "db_size": db_stat.st_size,
+                        "updated_at": db_stat.st_mtime * 1000,
+                        "is_current": session_id == app_state.current_session_id,
+                        "message_count": message_count,
+                        "has_outputs": output_count > 0,
+                        "output_count": output_count,
+                        "model": "claude-haiku-4-5",
+                    }
+                )
+            except FileNotFoundError:
+                # Arquivo foi deletado durante a listagem, ignorar
+                continue
 
     if SESSIONS_DIR.exists():
-        for jsonl_file in sorted(
-            SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True
-        ):
-            session_id = jsonl_file.stem
+        try:
+            jsonl_files = list(SESSIONS_DIR.glob("*.jsonl"))
+        except OSError:
+            jsonl_files = []
 
-            message_count = 0
+        for jsonl_file in jsonl_files:
             try:
-                with open(jsonl_file, "r") as f:
-                    message_count = len(f.readlines())
-            except (OSError, IOError):
-                pass  # File read failed, continue with count=0
+                session_id = jsonl_file.stem
 
-            sessions.append(
-                {
-                    "session_id": session_id,
-                    "file": f"backend/{jsonl_file.name}",
-                    "file_name": jsonl_file.name,
-                    "db_file": str(jsonl_file),
-                    "db_size": jsonl_file.stat().st_size,
-                    "updated_at": jsonl_file.stat().st_mtime * 1000,
-                    "is_current": False,
-                    "message_count": message_count,
-                    "has_outputs": False,
-                    "output_count": 0,
-                    "model": "claude-haiku-4-5",
-                }
-            )
+                message_count = 0
+                try:
+                    with open(jsonl_file, "r") as f:
+                        message_count = len(f.readlines())
+                except (OSError, IOError):
+                    pass  # File read failed, continue with count=0
+
+                jsonl_stat = jsonl_file.stat()
+                sessions.append(
+                    {
+                        "session_id": session_id,
+                        "file": f"backend/{jsonl_file.name}",
+                        "file_name": jsonl_file.name,
+                        "db_file": str(jsonl_file),
+                        "db_size": jsonl_stat.st_size,
+                        "updated_at": jsonl_stat.st_mtime * 1000,
+                        "is_current": False,
+                        "message_count": message_count,
+                        "has_outputs": False,
+                        "output_count": 0,
+                        "model": "claude-haiku-4-5",
+                    }
+                )
+            except FileNotFoundError:
+                # Arquivo foi deletado durante a listagem, ignorar
+                continue
 
     sessions.sort(key=lambda s: s["updated_at"], reverse=True)
     return {"count": len(sessions), "sessions": sessions}

@@ -338,17 +338,38 @@ async def chat_stream(
 
     r = None
     afs = None
+    is_new_session = False
     try:
         import app_state
         from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
 
-        # Usar session_id do frontend ou current_session_id
-        target_session_id = chat_request.session_id or app_state.current_session_id or "temp"
+        # Usar session_id do frontend ou current_session_id, ou gerar novo
+        if chat_request.session_id:
+            target_session_id = chat_request.session_id
+        elif app_state.current_session_id:
+            target_session_id = app_state.current_session_id
+        else:
+            # Nova sessão - gerar UUID
+            target_session_id = str(uuid.uuid4())
+            is_new_session = True
+            print(f"[STREAM] Nova sessão criada: {target_session_id}")
+
+            # Criar arquivo JSONL vazio para nova sessão
+            SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+            jsonl_file = SESSIONS_DIR / f"{target_session_id}.jsonl"
+            jsonl_file.touch()
 
         r = await ClaudeRAG.open(ClaudeRAGOptions(id=target_session_id))
 
         # Abrir AgentFS para salvar histórico
         afs = await AgentFS.open(AgentFSOptions(id=target_session_id))
+
+        # Para sessões novas, salvar projeto como chat-angular
+        if is_new_session:
+            try:
+                await afs.kv.set("session:project", "chat-angular")
+            except Exception:
+                pass
 
         async def generate():
             nonlocal afs
@@ -380,16 +401,15 @@ async def chat_stream(
                 except Exception as save_err:
                     print(f"[WARN] Erro ao salvar histórico: {save_err}")
 
-                # Também salvar no JSONL quando session_id específico é fornecido
-                if chat_request.session_id:
-                    try:
-                        append_to_jsonl(
-                            session_id=chat_request.session_id,
-                            user_message=chat_request.message,
-                            assistant_response=full_response,
-                        )
-                    except Exception as jsonl_err:
-                        print(f"[WARN] Erro ao salvar JSONL: {jsonl_err}")
+                # Salvar no JSONL (tanto para sessões novas quanto continuadas)
+                try:
+                    append_to_jsonl(
+                        session_id=target_session_id,
+                        user_message=chat_request.message,
+                        assistant_response=full_response,
+                    )
+                except Exception as jsonl_err:
+                    print(f"[WARN] Erro ao salvar JSONL: {jsonl_err}")
 
                 yield "data: [DONE]\n\n"
             except Exception as e:
