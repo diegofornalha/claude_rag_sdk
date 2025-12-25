@@ -47,8 +47,8 @@ async def get_current_session():
         try:
             session_info = await app_state.agentfs.kv.get("session:info")
             output_files = await app_state.agentfs.fs.readdir("/outputs")
-        except:
-            pass
+        except (OSError, IOError, KeyError):
+            pass  # Session info is optional, continue without it
 
     return {
         "active": True,
@@ -99,9 +99,10 @@ async def list_sessions():
                 try:
                     with open(jsonl_file, 'r') as f:
                         message_count = len(f.readlines())
-                except:
-                    pass
+                except (OSError, IOError):
+                    pass  # File read failed, continue with count=0
 
+            session_agentfs = None
             try:
                 session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
 
@@ -113,12 +114,13 @@ async def list_sessions():
                 try:
                     outputs = await session_agentfs.fs.readdir("/outputs")
                     output_count = len(outputs) if outputs else 0
-                except:
-                    output_count = 0
-
-                await session_agentfs.close()
+                except (OSError, IOError, FileNotFoundError):
+                    output_count = 0  # No outputs directory or read failed
             except Exception as e:
                 print(f"[WARN] Could not read session {session_id}: {e}")
+            finally:
+                if session_agentfs:
+                    await session_agentfs.close()
 
             sessions.append({
                 "session_id": session_id,
@@ -142,8 +144,8 @@ async def list_sessions():
             try:
                 with open(jsonl_file, 'r') as f:
                     message_count = len(f.readlines())
-            except:
-                pass
+            except (OSError, IOError):
+                pass  # File read failed, continue with count=0
 
             sessions.append({
                 "session_id": session_id,
@@ -237,8 +239,8 @@ async def get_session_messages(session_id: str):
                                 'content': msg.get('content'),
                                 'timestamp': entry.get('timestamp'),
                             })
-                    except:
-                        continue
+                    except json.JSONDecodeError:
+                        continue  # Skip malformed JSON lines
             return {"messages": messages, "count": len(messages), "type": "jsonl"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

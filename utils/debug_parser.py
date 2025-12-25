@@ -69,7 +69,7 @@ def parse_debug_file(session_id: str) -> list[DebugEntry]:
                         tool_name=tool_name,
                         event_type=event_type
                     ))
-    except Exception as e:
+    except (OSError, IOError, ValueError) as e:
         print(f"[WARN] Could not parse debug file {session_id}: {e}")
 
     return entries

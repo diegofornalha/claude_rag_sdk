@@ -21,18 +21,22 @@ async def rag_search(
     api_key: str = Depends(verify_api_key)
 ):
     """Search documents using RAG."""
+    from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+    temp_rag = None
     try:
-        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
         temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
         results = await temp_rag.search(query, top_k=top_k)
-        await temp_rag.close()
         return {
             "query": query,
             "results": [res.to_dict() for res in results],
             "count": len(results),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] RAG search failed: {e}")
+        raise HTTPException(status_code=500, detail="Search failed")
+    finally:
+        if temp_rag:
+            await temp_rag.close()
 
 
 @router.get("/search/test")
@@ -41,6 +45,7 @@ async def search_test(query: str, top_k: int = 5):
     if not RAG_DB_PATH.exists():
         return {"query": query, "results": [], "count": 0, "error": "Database not found"}
 
+    engine = None
     try:
         from claude_rag_sdk.search import SearchEngine
 
@@ -67,7 +72,11 @@ async def search_test(query: str, top_k: int = 5):
             "count": len(results)
         }
     except Exception as e:
-        return {"query": query, "results": [], "count": 0, "error": str(e)}
+        print(f"[ERROR] RAG search test failed: {e}")
+        return {"query": query, "results": [], "count": 0, "error": "Search failed"}
+    finally:
+        # SearchEngine doesn't hold persistent connections, but cleanup if needed
+        del engine
 
 
 @router.post("/ingest")
@@ -78,27 +87,35 @@ async def rag_ingest(
     api_key: str = Depends(verify_api_key)
 ):
     """Add document to RAG."""
+    from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+    temp_rag = None
     try:
-        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
         temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
         result = await temp_rag.add_text(content, source)
-        await temp_rag.close()
         return result.to_dict()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] RAG ingest failed: {e}")
+        raise HTTPException(status_code=500, detail="Ingest failed")
+    finally:
+        if temp_rag:
+            await temp_rag.close()
 
 
 @router.get("/stats")
 async def rag_stats():
     """Get RAG statistics."""
+    from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+    temp_rag = None
     try:
-        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
         temp_rag = await ClaudeRAG.open(ClaudeRAGOptions(id=app_state.current_session_id or "temp"))
         stats = await temp_rag.stats()
-        await temp_rag.close()
         return stats
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] RAG stats failed: {e}")
+        raise HTTPException(status_code=500, detail="Stats retrieval failed")
+    finally:
+        if temp_rag:
+            await temp_rag.close()
 
 
 @router.get("/config")
@@ -117,6 +134,7 @@ async def rag_config():
     }
 
     if db_exists and db_size > 0:
+        engine = None
         try:
             from claude_rag_sdk.ingest import IngestEngine
             engine = IngestEngine(
@@ -126,6 +144,9 @@ async def rag_config():
             stats = engine.stats
         except Exception as e:
             print(f"[WARN] Could not get RAG stats: {e}")
+        finally:
+            # IngestEngine doesn't hold persistent connections, but cleanup if needed
+            del engine
 
     return {
         "db_path": str(RAG_DB_PATH),
@@ -202,49 +223,48 @@ async def list_documents(limit: int = 50, offset: int = 0):
         return {"documents": [], "total": 0}
 
     try:
-        conn = sqlite3.connect(str(RAG_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with sqlite3.connect(str(RAG_DB_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        # Get total count
-        cursor.execute("SELECT COUNT(*) FROM documentos")
-        total = cursor.fetchone()[0]
+            # Get total count
+            cursor.execute("SELECT COUNT(*) FROM documentos")
+            total = cursor.fetchone()[0]
 
-        # Get documents with pagination
-        cursor.execute("""
-            SELECT
-                id,
-                nome,
-                tipo,
-                LENGTH(conteudo) as content_length,
-                caminho,
-                hash,
-                metadata,
-                criado_em
-            FROM documentos
-            ORDER BY criado_em DESC
-            LIMIT ? OFFSET ?
-        """, [limit, offset])
+            # Get documents with pagination
+            cursor.execute("""
+                SELECT
+                    id,
+                    nome,
+                    tipo,
+                    LENGTH(conteudo) as content_length,
+                    caminho,
+                    hash,
+                    metadata,
+                    criado_em
+                FROM documentos
+                ORDER BY criado_em DESC
+                LIMIT ? OFFSET ?
+            """, [limit, offset])
 
-        documents = []
-        for row in cursor.fetchall():
-            doc = dict(row)
-            # Parse metadata if JSON
-            if doc.get('metadata'):
-                try:
-                    doc['metadata'] = json.loads(doc['metadata'])
-                except:
-                    pass
-            documents.append(doc)
+            documents = []
+            for row in cursor.fetchall():
+                doc = dict(row)
+                # Parse metadata if JSON
+                if doc.get('metadata'):
+                    try:
+                        doc['metadata'] = json.loads(doc['metadata'])
+                    except json.JSONDecodeError as e:
+                        print(f"[WARN] Failed to parse metadata JSON: {e}")
+                        pass  # Keep raw metadata if not valid JSON
+                documents.append(doc)
 
-        conn.close()
-
-        return {
-            "documents": documents,
-            "total": total,
-            "limit": limit,
-            "offset": offset
-        }
+            return {
+                "documents": documents,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
 
     except Exception as e:
         return {"documents": [], "total": 0, "error": str(e)}
@@ -260,34 +280,32 @@ async def get_document(doc_id: int):
         raise HTTPException(status_code=404, detail="RAG database not found")
 
     try:
-        conn = sqlite3.connect(str(RAG_DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with sqlite3.connect(str(RAG_DB_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        # Get document
-        cursor.execute("""
-            SELECT * FROM documentos WHERE id = ?
-        """, [doc_id])
+            # Get document
+            cursor.execute("""
+                SELECT * FROM documentos WHERE id = ?
+            """, [doc_id])
 
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
-            raise HTTPException(status_code=404, detail="Document not found")
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Document not found")
 
-        doc = dict(row)
+            doc = dict(row)
 
-        # Parse metadata
-        if doc.get('metadata'):
-            try:
-                doc['metadata'] = json.loads(doc['metadata'])
-            except:
-                pass
+            # Parse metadata
+            if doc.get('metadata'):
+                try:
+                    doc['metadata'] = json.loads(doc['metadata'])
+                except json.JSONDecodeError as e:
+                    print(f"[WARN] Failed to parse metadata JSON: {e}")
+                    pass  # Keep raw metadata if not valid JSON
 
-        doc['has_embedding'] = True  # Assume yes (embedding is created with doc)
+            doc['has_embedding'] = True  # Assume yes (embedding is created with doc)
 
-        conn.close()
-
-        return doc
+            return doc
 
     except HTTPException:
         raise
@@ -304,6 +322,7 @@ async def delete_document(doc_id: int, api_key: str = Depends(verify_api_key)):
     if not RAG_DB_PATH.exists():
         raise HTTPException(status_code=404, detail="RAG database not found")
 
+    conn = None
     try:
         conn = apsw.Connection(str(RAG_DB_PATH))
         conn.enableloadextension(True)
@@ -315,7 +334,6 @@ async def delete_document(doc_id: int, api_key: str = Depends(verify_api_key)):
         cursor.execute("SELECT nome FROM documentos WHERE id = ?", [doc_id])
         row = cursor.fetchone()
         if not row:
-            conn.close()
             raise HTTPException(status_code=404, detail="Document not found")
 
         nome = row[0]
@@ -326,8 +344,6 @@ async def delete_document(doc_id: int, api_key: str = Depends(verify_api_key)):
         # Delete from documentos
         cursor.execute("DELETE FROM documentos WHERE id = ?", [doc_id])
 
-        conn.close()
-
         return {
             "success": True,
             "message": f"Document '{nome}' deleted",
@@ -337,4 +353,8 @@ async def delete_document(doc_id: int, api_key: str = Depends(verify_api_key)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] Delete document failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete document")
+    finally:
+        if conn:
+            conn.close()

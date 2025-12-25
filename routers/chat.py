@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import asyncio
 import time
+import re
 
 from claude_rag_sdk.core.rate_limiter import get_limiter, RATE_LIMITS
 from claude_rag_sdk.core.prompt_guard import PromptGuard
@@ -15,6 +16,22 @@ from claude_rag_sdk.core.auth import verify_api_key
 from app_state import get_client, get_agentfs
 
 router = APIRouter(tags=["Chat"])
+
+
+def validate_session_id(session_id: str) -> bool:
+    """Validate session_id to prevent path traversal attacks.
+
+    Returns True if valid, raises HTTPException if invalid.
+    """
+    if not session_id:
+        return False
+    # Only allow UUID-like patterns and alphanumeric with hyphens
+    if not re.match(r'^[a-zA-Z0-9\-_]+$', session_id):
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
+    # Prevent path traversal
+    if '..' in session_id or '/' in session_id or '\\' in session_id:
+        raise HTTPException(status_code=400, detail="Invalid session_id: path traversal detected")
+    return True
 
 # RAG Knowledge base path (separado do AgentFS para evitar conflitos)
 RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
@@ -83,6 +100,10 @@ async def chat(
 
         session_specific_afs = None
         target_session_id = chat_request.session_id or app_state.current_session_id
+
+        # Validate session_id to prevent path traversal
+        if target_session_id:
+            validate_session_id(target_session_id)
 
         if chat_request.session_id and chat_request.session_id != app_state.current_session_id:
             session_specific_afs = await AgentFS.open(AgentFSOptions(id=chat_request.session_id))
@@ -189,18 +210,19 @@ Exemplo: {outputs_path}/meu_arquivo.txt
         tmp_outputs = Path("/tmp/outputs")
         if tmp_outputs.exists():
             for item in tmp_outputs.iterdir():
-                if item.is_file():
+                # Validate filename to prevent path traversal attacks
+                if item.is_file() and '..' not in item.name and '/' not in item.name:
                     target = session_outputs / item.name
                     shutil.move(str(item), str(target))
-
-        if session_specific_afs:
-            await session_specific_afs.close()
 
         return ChatResponse(response=response_text)
 
     except Exception as e:
         print(f"[ERROR] Chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Chat processing failed")
+    finally:
+        if session_specific_afs:
+            await session_specific_afs.close()
 
 
 @router.post("/chat/stream")

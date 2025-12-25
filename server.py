@@ -57,6 +57,7 @@ app.add_middleware(
         "http://localhost:8001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8001",
+        "null",  # Allow file:// protocol for local development
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -99,10 +100,7 @@ async def root():
         "message": "Chat Simples v3 - Claude RAG SDK",
         "auth_enabled": is_auth_enabled()
     }
-    if env != "production" and is_auth_enabled():
-        from claude_rag_sdk.core.auth import VALID_API_KEYS
-        if VALID_API_KEYS:
-            response["dev_key"] = list(VALID_API_KEYS)[0]
+    # API keys nunca são expostas - use variáveis de ambiente
     return response
 
 
@@ -134,10 +132,7 @@ async def health_check():
 
     rag_stats = None
     if app_state.agentfs:
-        try:
-            rag_stats = {"agentfs": "active"}
-        except:
-            pass
+        rag_stats = {"agentfs": "active"}
 
     return {
         "status": "healthy",

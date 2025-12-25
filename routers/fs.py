@@ -29,11 +29,11 @@ async def get_filesystem_tree(path: str = "/"):
                             item["type"] = "directory"
                         else:
                             item["type"] = "file"
-                    except:
-                        item["type"] = "file"
+                    except (OSError, IOError, PermissionError):
+                        item["type"] = "file"  # Fallback if can't list children
                     items.append(item)
-            except:
-                pass
+            except (OSError, IOError, PermissionError):
+                pass  # Skip inaccessible directories
             return items
 
         tree = await list_tree(path)

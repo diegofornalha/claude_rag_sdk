@@ -46,8 +46,8 @@ def extract_session_id_from_jsonl() -> Optional[str]:
             if first_line:
                 data = json.loads(first_line)
                 return data.get("sessionId", latest_jsonl.stem)
-    except:
-        return latest_jsonl.stem
+    except (OSError, IOError, json.JSONDecodeError):
+        return latest_jsonl.stem  # Fallback to filename if parse fails
 
     return None
 
@@ -223,8 +223,8 @@ def get_current_session_id() -> Optional[str]:
     if session_file.exists():
         try:
             return session_file.read_text().strip()
-        except:
-            pass
+        except (OSError, IOError):
+            pass  # File read failed, return None
 
     return None
 
