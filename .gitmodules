@@ -1,0 +1,6 @@
+[submodule "claude_rag_sdk"]
+	path = claude_rag_sdk
+	url = file:///Users/2a/.claude/hello-agent/chat-simples/backend/claude_rag_sdk
+[submodule ".agentfs"]
+	path = .agentfs
+	url = file:///Users/2a/.claude/hello-agent/chat-simples/backend/.agentfs
