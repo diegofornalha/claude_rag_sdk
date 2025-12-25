@@ -30,8 +30,8 @@ env/
 .DS_Store
 Thumbs.db
 
-# AgentFS databases (note: .agentfs/ is now a submodule, so it's tracked)
-# *.db files outside .agentfs submodule
+# AgentFS databases
+.agentfs/
 *.db
 
 # Test outputs
