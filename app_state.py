@@ -1,10 +1,18 @@
 """Core module - shared state and helper functions."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from agentfs_sdk import AgentFS
+    from claude_agent_sdk import ClaudeSDKClient
+
+    from claude_rag_sdk import AgentModel
 
 # =============================================================================
 # CONFIGURATION
@@ -21,8 +29,8 @@ SESSIONS_DIR = (
 )
 
 # Global client and AgentFS instances
-client: Optional["ClaudeSDKClient"] = None
-agentfs: Optional["AgentFS"] = None
+client: Optional[ClaudeSDKClient] = None
+agentfs: Optional[AgentFS] = None
 current_session_id: Optional[str] = None
 current_model: str = "haiku"  # Modelo atual: haiku, sonnet, opus
 
@@ -57,7 +65,7 @@ def extract_session_id_from_jsonl() -> Optional[str]:
     return None
 
 
-def _get_agent_model(model_name: str) -> tuple["AgentModel", str]:
+def _get_agent_model(model_name: str) -> tuple[AgentModel, str]:
     """Converte nome do modelo para AgentModel enum.
 
     Returns:
@@ -79,7 +87,7 @@ def _get_agent_model(model_name: str) -> tuple["AgentModel", str]:
         return AgentModel.HAIKU, "haiku"
 
 
-async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
+async def get_client(model: Optional[str] = None) -> ClaudeSDKClient:
     """Get ClaudeSDKClient instance (manages sessions automatically).
 
     Args:
@@ -195,7 +203,7 @@ async def get_client(model: Optional[str] = None) -> "ClaudeSDKClient":
     return client
 
 
-async def get_agentfs() -> "AgentFS":
+async def get_agentfs() -> AgentFS:
     """Get AgentFS instance."""
     global agentfs
     if agentfs is None:

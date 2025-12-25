@@ -7,11 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import app_state
 from claude_rag_sdk.core.auth import verify_api_key
+from utils.file_watcher import get_watcher
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
-
-# Import watcher utilities
-from utils.file_watcher import get_watcher
 
 # RAG Knowledge base path
 RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
