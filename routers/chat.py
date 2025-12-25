@@ -15,8 +15,38 @@ from claude_rag_sdk.core.auth import verify_api_key
 from app_state import get_client, get_agentfs
 
 router = APIRouter(tags=["Chat"])
+
+# RAG Knowledge base path (separado do AgentFS para evitar conflitos)
+RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
 limiter = get_limiter()
 prompt_guard = PromptGuard(strict_mode=False)
+
+
+async def search_rag_context(query: str, top_k: int = 3) -> str:
+    """Busca contexto relevante na base RAG."""
+    if not RAG_DB_PATH.exists():
+        return ""
+
+    try:
+        from claude_rag_sdk.search import SearchEngine
+        engine = SearchEngine(
+            db_path=str(RAG_DB_PATH),
+            embedding_model="BAAI/bge-small-en-v1.5",
+            enable_reranking=False,  # Mais rápido
+        )
+        results = await engine.search(query, top_k=top_k)
+
+        if not results:
+            return ""
+
+        context_parts = []
+        for r in results:
+            context_parts.append(f"[Fonte: {r.source}]\n{r.content[:2000]}")
+
+        return "\n\n---\n\n".join(context_parts)
+    except Exception as e:
+        print(f"[WARN] RAG search error: {e}")
+        return ""
 
 
 class ChatRequest(BaseModel):
@@ -63,8 +93,24 @@ async def chat(
 
         call_id = await afs.tools.start("chat", {"message": chat_request.message[:100]})
 
+        # Buscar contexto RAG
+        rag_context = await search_rag_context(chat_request.message)
+
         outputs_path = str(Path.cwd() / "outputs" / target_session_id)
-        context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
+
+        # Construir mensagem com contexto RAG se disponível
+        if rag_context:
+            context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
+Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
+
+[BASE DE CONHECIMENTO - Use estas informações para responder]
+{rag_context}
+
+[MENSAGEM DO USUÁRIO]
+{chat_request.message}"""
+            print(f"[RAG] Contexto encontrado: {len(rag_context)} chars")
+        else:
+            context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
 Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
 Exemplo: {outputs_path}/meu_arquivo.txt
 

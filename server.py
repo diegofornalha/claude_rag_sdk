@@ -19,6 +19,7 @@ from claude_rag_sdk.core.auth import is_auth_enabled
 from claude_rag_sdk.core.rate_limiter import SLOWAPI_AVAILABLE
 
 import app_state
+
 from routers import (
     audit_router,
     chat_router,
