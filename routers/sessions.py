@@ -124,6 +124,7 @@ async def list_sessions():
 
             session_agentfs = None
             project = "chat-simples"  # Default
+            title = None  # Título customizado
             try:
                 session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
 
@@ -132,6 +133,14 @@ async def list_sessions():
                     stored_project = await session_agentfs.kv.get("session:project")
                     if stored_project:
                         project = stored_project
+                except Exception:
+                    pass
+
+                # Ler título customizado
+                try:
+                    stored_title = await session_agentfs.kv.get("session:title")
+                    if stored_title:
+                        title = stored_title
                 except Exception:
                     pass
 
@@ -158,6 +167,7 @@ async def list_sessions():
                 sessions.append(
                     {
                         "session_id": session_id,
+                        "title": title,  # Título customizado (pode ser None)
                         "file": f"{project}/{session_id}",
                         "file_name": session_id,
                         "db_file": str(db_file),
@@ -295,6 +305,37 @@ async def delete_session(session_id: str):
         "was_active": was_active,
         "new_session_id": app_state.current_session_id if was_active else None,
     }
+
+
+@router.patch("/sessions/{session_id}")
+async def update_session(session_id: str, request: Request):
+    """Update session metadata (e.g., title)."""
+    from agentfs_sdk import AgentFS, AgentFSOptions
+
+    validate_session_id(session_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    title = body.get("title")
+    if not title or not isinstance(title, str):
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    # Limitar tamanho do título
+    title = title.strip()[:100]
+
+    session_agentfs = None
+    try:
+        session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
+        await session_agentfs.kv.set("session:title", title)
+        return {"success": True, "session_id": session_id, "title": title}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update session: {e}")
+    finally:
+        if session_agentfs:
+            await session_agentfs.close()
 
 
 @router.get("/sessions/{session_id}")
