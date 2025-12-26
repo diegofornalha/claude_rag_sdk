@@ -189,25 +189,50 @@ async def get_client(
         agent_model, normalized_model = _get_agent_model(requested_model)
         current_model = normalized_model
 
+        # CORREÇÃO MCP: Ler e parsear .mcp.json programaticamente (SDK não lê automaticamente)
+        mcp_servers_dict = None
+        allowed_tools_list = []
+
+        mcp_config_path = Path.home() / ".mcp.json"
+        if mcp_config_path.exists():
+            try:
+                with open(mcp_config_path, "r") as f:
+                    mcp_config = json.load(f)
+                    mcp_servers_dict = mcp_config.get("mcpServers", {})
+
+                # Configurar allowed_tools para todos os servidores MCP Neo4j
+                allowed_tools_list = [
+                    "mcp__neo4j-cypher__*",
+                    "mcp__neo4j-memory__*",
+                    "mcp__neo4j-data-modeling__*",
+                    "mcp__neo4j-aura-manager__*",
+                ]
+
+                print(f"[MCP] Carregando {len(mcp_servers_dict)} servidores de: {mcp_config_path}")
+                print(f"[MCP] Servidores: {list(mcp_servers_dict.keys())}")
+                print(f"[MCP] Allowed tools patterns: {allowed_tools_list}")
+            except Exception as e:
+                print(f"[MCP] Erro ao carregar .mcp.json: {e}")
+                mcp_servers_dict = None
+        else:
+            print("[MCP] Arquivo .mcp.json não encontrado - MCP servers desabilitados")
+
+        # Criar options do AgentEngine (sem MCP - será adicionado depois)
         temp_options = ClaudeRAGOptions(
             id="temp", agent_model=agent_model, system_prompt=system_prompt
         )
 
-        # ATIVAR SERVIDORES MCP NEO4J: Passar configuração para o Claude SDK
-        mcp_config_path = Path.home() / ".mcp.json"
-        mcp_path_str = str(mcp_config_path) if mcp_config_path.exists() else None
-
-        if mcp_path_str:
-            print(f"[MCP] Carregando servidores MCP de: {mcp_path_str}")
-        else:
-            print("[MCP] Arquivo .mcp.json não encontrado - MCP servers desabilitados")
-
-        engine = AgentEngine(options=temp_options, mcp_server_path=mcp_path_str)
+        engine = AgentEngine(options=temp_options, mcp_server_path=None)
         client_options = engine._get_agent_options()
 
-        # EXPOR TOOLS MCP: Configurar permission mode para permitir uso das ferramentas
+        # ADICIONAR MCP PROGRAMATICAMENTE (solução correta)
+        if mcp_servers_dict:
+            client_options.mcp_servers = mcp_servers_dict
+            client_options.allowed_tools = allowed_tools_list
+
+        # Configurar permission mode
         client_options.permission_mode = "bypassPermissions"
-        print("[MCP] Permission mode: bypassPermissions (tools MCP habilitadas)")
+        print("[MCP] Permission mode: bypassPermissions")
 
         # Adicionar hooks nativos do SDK para auditoria automática
         try:

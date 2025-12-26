@@ -30,6 +30,8 @@ from routers import (
     sessions_router,
 )
 
+# from routers.neo4j_mcp import router as neo4j_mcp_router  # Bridge desnecessário - SDK funciona agora!
+
 # =============================================================================
 # FASTAPI APP
 # =============================================================================
@@ -97,6 +99,7 @@ app.include_router(sessions_router)
 app.include_router(outputs_router)
 app.include_router(audit_router)
 app.include_router(fs_router)
+# app.include_router(neo4j_mcp_router)  # Não necessário - SDK funciona!
 
 # MCP router é opcional - só inclui se disponível
 if is_mcp_available() and mcp_router:
