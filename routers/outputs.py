@@ -142,15 +142,41 @@ async def write_output_file(filename: str, content: str, directory: str = "/outp
 
 @router.delete("/{filename:path}")
 async def delete_output(filename: str):
-    """Delete file from AgentFS filesystem."""
+    """Delete file from physical filesystem (outputs/ directory)."""
     # Validate filename to prevent path traversal
     validate_filename(filename)
 
     try:
-        afs = await get_agentfs()
-        filepath = f"/outputs/{filename}" if not filename.startswith("/") else filename
-        await afs.fs.unlink(filepath)
-        return {"success": True, "deleted": filepath}
+        # Deletar do filesystem físico (outputs/{session_id}/{filename})
+        outputs_dir = Path.cwd() / "outputs"
+        filepath = outputs_dir / filename
+
+        # Verificar se o caminho está dentro de outputs/ (segurança)
+        if not filepath.resolve().is_relative_to(outputs_dir.resolve()):
+            print(f"[SECURITY] Tentativa de path traversal: {filename}")
+            return {"success": False, "error": "Invalid path"}
+
+        if filepath.exists() and filepath.is_file():
+            # Guardar pasta pai para verificar se ficou vazia
+            parent_dir = filepath.parent
+
+            # Deletar arquivo
+            filepath.unlink()
+            print(f"[DELETE] Arquivo deletado: {filepath}")
+
+            # Verificar se pasta ficou vazia e deletar se for o caso
+            deleted_dir = None
+            if parent_dir.exists() and parent_dir != outputs_dir:
+                remaining_files = list(parent_dir.iterdir())
+                if len(remaining_files) == 0:
+                    parent_dir.rmdir()
+                    deleted_dir = str(parent_dir)
+                    print(f"[DELETE] Pasta vazia removida: {parent_dir}")
+
+            return {"success": True, "deleted": str(filepath), "deleted_dir": deleted_dir}
+        else:
+            print(f"[WARN] Arquivo não encontrado: {filepath}")
+            return {"success": False, "error": "File not found"}
     except Exception as e:
         print(f"[ERROR] Failed to delete file {filename}: {e}")
-        return {"success": False, "error": "Failed to delete file"}
+        return {"success": False, "error": f"Failed to delete file: {e}"}

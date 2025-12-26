@@ -254,19 +254,20 @@ async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depen
             context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
 Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
 
-[BASE DE CONHECIMENTO - Use estas informações para responder]
+<contexto_interno>
 {rag_context}
+</contexto_interno>
 
-[MENSAGEM DO USUÁRIO]
-{chat_request.message}"""
+INSTRUÇÕES: O contexto acima é APENAS para sua referência interna. NÃO repita, cite ou mostre esse contexto na sua resposta. Responda de forma natural e direta à pergunta do usuário, usando as informações do contexto quando relevante, mas sem expor a estrutura interna.
+
+Pergunta do usuário: {chat_request.message}"""
             print(f"[RAG] Contexto encontrado: {len(rag_context)} chars")
         else:
             context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
 Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
 Exemplo: {outputs_path}/meu_arquivo.txt
 
-[MENSAGEM DO USUÁRIO]
-{chat_request.message}"""
+Pergunta do usuário: {chat_request.message}"""
 
         await c.query(context_message)
 
@@ -427,31 +428,44 @@ async def chat_stream(
         validate_session_id(chat_request.session_id)
 
     afs = None
-    is_new_session = False
     try:
         import app_state
 
+        # Obter projeto do header (Angular envia X-Client-Project)
+        project = request.headers.get("X-Client-Project", "chat-simples")
+
         # Determinar session_id a usar
         if chat_request.session_id:
-            # Frontend enviou session_id específico - usar esse
+            # Frontend enviou session_id específico - MANTER essa sessão
             target_session_id = chat_request.session_id
+            # Chamar get_client() para ter o client disponível (pode criar sessão interna diferente)
+            await get_client(model=chat_request.model)
+            # IMPORTANTE: Não substituir a sessão do usuário mesmo se modelo mudou!
+            # O usuário quer continuar na mesma conversa
+            if app_state.current_session_id != target_session_id:
+                print(
+                    f"[STREAM] Modelo diferente mas mantendo sessão do usuário: {target_session_id}"
+                )
         else:
             # Sem session_id do frontend - usar get_client() para criar/obter sessão
             # Isso garante que JSONL seja criado via ClaudeSDKClient (mesmo comportamento do /chat)
             await get_client(model=chat_request.model)
             target_session_id = app_state.current_session_id
-            is_new_session = True
             print(f"[STREAM] Usando sessão do get_client: {target_session_id}")
 
         # Abrir AgentFS para salvar histórico (não usar ClaudeRAG para evitar JSONL duplicado)
         afs = await AgentFS.open(AgentFSOptions(id=target_session_id))
 
-        # Para sessões novas, salvar projeto como chat-angular
-        if is_new_session:
-            try:
-                await afs.kv.set("session:project", "chat-angular")
-            except Exception:
-                pass
+        # SEMPRE salvar projeto do header (Angular envia "chat-angular")
+        # Isso garante que mesmo sessões criadas via /reset sejam marcadas corretamente
+        try:
+            current_project = await afs.kv.get("session:project")
+            # Só atualiza se ainda não foi definido ou é diferente
+            if not current_project or current_project != project:
+                await afs.kv.set("session:project", project)
+                print(f"[STREAM] Projeto definido: {project} (anterior: {current_project})")
+        except Exception as e:
+            print(f"[WARN] Erro ao salvar projeto: {e}")
 
         # Detectar comandos de gerenciamento de sessão
         command, extra_data = detect_session_command(chat_request.message)
@@ -509,23 +523,30 @@ async def chat_stream(
             try:
                 from claude_agent_sdk import AssistantMessage, TextBlock
 
-                # Buscar contexto RAG explicitamente (mesmo comportamento do /chat)
+                # Usar o client do app_state
+                client = await get_client(model=chat_request.model)
+
+                # Buscar contexto RAG para enriquecer a resposta
                 rag_context = await search_rag_context(chat_request.message)
 
-                # Construir mensagem com contexto RAG se disponível
-                if rag_context:
-                    query_message = f"""[BASE DE CONHECIMENTO - Use estas informações para responder]
-{rag_context}
+                # Construir mensagem com contexto RAG (se disponível)
+                outputs_path = str(Path.cwd() / "outputs" / target_session_id)
 
-[MENSAGEM DO USUÁRIO]
+                if rag_context and not rag_context.startswith("[AVISO"):
+                    # Incluir contexto RAG como instrução interna
+                    query_message = f"""Ao criar arquivos, use: {outputs_path}/
+
+<base_conhecimento>
+{rag_context}
+</base_conhecimento>
+
+IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, cite ou mencione que você está usando uma base de conhecimento. Responda naturalmente.
+
 {chat_request.message}"""
-                    print(f"[STREAM-RAG] Contexto encontrado: {len(rag_context)} chars")
+                    print(f"[RAG] Contexto incluído: {len(rag_context)} chars")
                 else:
                     query_message = chat_request.message
 
-                # Usar o client do app_state em vez de criar novo via r.query()
-                # Isso evita criar JSONL duplicado
-                client = await get_client(model=chat_request.model)
                 await client.query(query_message)
 
                 # Enviar session_id no primeiro chunk
