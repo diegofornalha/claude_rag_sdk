@@ -205,6 +205,10 @@ async def get_client(
         engine = AgentEngine(options=temp_options, mcp_server_path=mcp_path_str)
         client_options = engine._get_agent_options()
 
+        # EXPOR TOOLS MCP: Configurar permission mode para permitir uso das ferramentas
+        client_options.permission_mode = "bypassPermissions"
+        print("[MCP] Permission mode: bypassPermissions (tools MCP habilitadas)")
+
         # Adicionar hooks nativos do SDK para auditoria automática
         try:
             sdk_hooks = get_sdk_hooks_config()
