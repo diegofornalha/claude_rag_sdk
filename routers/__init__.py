@@ -7,6 +7,15 @@ from .outputs import router as outputs_router
 from .rag import router as rag_router
 from .sessions import router as sessions_router
 
+# MCP router é opcional - pode ser removido sem afetar o sistema
+try:
+    from .mcp_ingest import router as mcp_router
+
+    _mcp_available = True
+except ImportError:
+    mcp_router = None
+    _mcp_available = False
+
 __all__ = [
     "audit_router",
     "chat_router",
@@ -14,4 +23,10 @@ __all__ = [
     "sessions_router",
     "outputs_router",
     "fs_router",
+    "mcp_router",
 ]
+
+
+def is_mcp_available() -> bool:
+    """Verifica se o módulo MCP está disponível."""
+    return _mcp_available

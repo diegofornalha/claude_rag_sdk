@@ -23,6 +23,8 @@ from routers import (
     audit_router,
     chat_router,
     fs_router,
+    is_mcp_available,
+    mcp_router,
     outputs_router,
     rag_router,
     sessions_router,
@@ -96,6 +98,10 @@ app.include_router(outputs_router)
 app.include_router(audit_router)
 app.include_router(fs_router)
 
+# MCP router é opcional - só inclui se disponível
+if is_mcp_available() and mcp_router:
+    app.include_router(mcp_router)
+
 
 # =============================================================================
 # HEALTH ENDPOINTS
@@ -164,6 +170,9 @@ async def health_check():
             "auth_enabled": is_auth_enabled(),
             "rate_limiter": "slowapi" if SLOWAPI_AVAILABLE else "simple",
             "prompt_guard": "active",
+        },
+        "mcp": {
+            "available": is_mcp_available(),
         },
     }
 
