@@ -117,9 +117,11 @@ def append_to_jsonl(
     """Append user and assistant messages to a session's JSONL file."""
     jsonl_file = SESSIONS_DIR / f"{session_id}.jsonl"
 
+    # CORREÇÃO: Criar arquivo se não existir (em vez de retornar)
     if not jsonl_file.exists():
-        print(f"[WARN] JSONL file not found for session {session_id}")
-        return
+        print(f"[INFO] Criando arquivo JSONL para nova sessão: {session_id}")
+        jsonl_file.parent.mkdir(parents=True, exist_ok=True)
+        jsonl_file.touch()  # Criar arquivo vazio
 
     timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     user_uuid = str(uuid.uuid4())
