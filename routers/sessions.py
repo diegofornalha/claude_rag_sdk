@@ -59,9 +59,8 @@ async def get_current_session():
 async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key)):
     """Start new session."""
     old_session = app_state.current_session_id
-    await reset_session()
 
-    # Obter projeto do header ou body
+    # Obter projeto do header ou body ANTES de criar a sessão
     project = request.headers.get("X-Client-Project", "chat-simples")
     try:
         body = await request.json()
@@ -69,12 +68,8 @@ async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key
     except Exception:
         pass
 
-    # Armazenar projeto no AgentFS
-    try:
-        agentfs = await app_state.get_agentfs()
-        await agentfs.kv.set("session:project", project)
-    except Exception as e:
-        print(f"[WARN] Could not save project: {e}")
+    # Criar nova sessão já com o projeto definido
+    await reset_session(project=project)
 
     return {
         "status": "ok",
@@ -413,12 +408,28 @@ async def get_session_details(session_id: str):
     return await get_session_messages(session_id)
 
 
+def _is_internal_message(content: str) -> bool:
+    """Check if message is internal RAG context that should be hidden from user."""
+    if not content or not isinstance(content, str):
+        return False
+    # Mensagens que começam com contexto de arquivo ou contêm base_conhecimento
+    internal_patterns = [
+        "Ao criar arquivos, use:",
+        "<base_conhecimento>",
+        "<contexto_interno>",
+        "[CONTEXTO DO SISTEMA",
+    ]
+    return any(pattern in content for pattern in internal_patterns)
+
+
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
     """Get messages from a session (supports both AgentFS and legacy JSONL)."""
     # Validate session_id to prevent path traversal
     validate_session_id(session_id)
     import json
+
+    from agentfs_sdk import AgentFS, AgentFSOptions
 
     old_sessions_dirs = [
         Path.home() / ".claude" / "projects" / "-Users-2a--claude-hello-agent-chat-simples-backend",
@@ -444,10 +455,14 @@ async def get_session_messages(session_id: str):
                         entry = json.loads(line.strip())
                         if entry.get("type") in ["user", "assistant"]:
                             msg = entry.get("message", {})
+                            content = msg.get("content", "")
+                            # Filtrar mensagens internas (contexto RAG)
+                            if isinstance(content, str) and _is_internal_message(content):
+                                continue
                             messages.append(
                                 {
                                     "role": msg.get("role"),
-                                    "content": msg.get("content"),
+                                    "content": content,
                                     "timestamp": entry.get("timestamp"),
                                 }
                             )
@@ -457,11 +472,42 @@ async def get_session_messages(session_id: str):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    # Tentar carregar do AgentFS - primeiro verifica se é a sessão atual
     if app_state.agentfs and app_state.current_session_id == session_id:
         try:
             history = await app_state.agentfs.kv.get("conversation:history") or []
-            return {"messages": history, "count": len(history), "type": "agentfs"}
+            # Filtrar mensagens internas (contexto RAG)
+            filtered_history = [
+                msg
+                for msg in history
+                if not _is_internal_message(
+                    msg.get("content", "") if isinstance(msg.get("content"), str) else ""
+                )
+            ]
+            return {"messages": filtered_history, "count": len(filtered_history), "type": "agentfs"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    # Se não é a sessão atual, tenta abrir o AgentFS da sessão solicitada
+    session_db = AGENTFS_DIR / f"{session_id}.db"
+    if session_db.exists():
+        session_agentfs = None
+        try:
+            session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
+            history = await session_agentfs.kv.get("conversation:history") or []
+            # Filtrar mensagens internas (contexto RAG)
+            filtered_history = [
+                msg
+                for msg in history
+                if not _is_internal_message(
+                    msg.get("content", "") if isinstance(msg.get("content"), str) else ""
+                )
+            ]
+            return {"messages": filtered_history, "count": len(filtered_history), "type": "agentfs"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            if session_agentfs:
+                await session_agentfs.close()
 
     raise HTTPException(status_code=404, detail="Session not found")

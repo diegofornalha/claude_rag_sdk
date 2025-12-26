@@ -111,12 +111,15 @@ def _get_agent_model(model_name: str) -> tuple[AgentModel, str]:
         return AgentModel.HAIKU, "haiku"
 
 
-async def get_client(model: Optional[str] = None) -> ClaudeSDKClient:
+async def get_client(model: Optional[str] = None, project: Optional[str] = None) -> ClaudeSDKClient:
     """Get ClaudeSDKClient instance (manages sessions automatically).
 
     Args:
         model: Optional model name (haiku, sonnet, opus). If different from
                current model, recreates client with new model.
+        project: Optional project name (e.g., 'chat-angular', 'chat-simples').
+                 If provided and a new session is created, this project will be
+                 saved to the session immediately.
     """
     global client, agentfs, current_session_id, current_model
 
@@ -230,6 +233,12 @@ async def get_client(model: Optional[str] = None) -> ClaudeSDKClient:
             },
         )
 
+        # Salvar projeto imediatamente se fornecido
+        # Isso garante que sessões criadas já tenham o projeto correto
+        if project:
+            await agentfs.kv.set("session:project", project)
+            print(f"[INFO] Projeto definido na criação: {project}")
+
         await agentfs.fs.write_file(
             "/logs/session_start.txt",
             f"Session {current_session_id} | Model: {current_model} | {time.strftime('%Y-%m-%d %H:%M:%S')}",
@@ -277,8 +286,12 @@ async def clear_session():
     print(f"[INFO] Session cleared: {old_session} (new session will be created on first message)")
 
 
-async def reset_session():
+async def reset_session(project: Optional[str] = None):
     """Reset session (creates new ClaudeSDKClient + AgentFS).
+
+    Args:
+        project: Optional project name. If provided, the new session will be
+                 created with this project already set.
 
     Note: We don't try to close the old client because it causes issues
     when called from a different asyncio task. The garbage collector
@@ -291,9 +304,9 @@ async def reset_session():
     # Clear current session first
     await clear_session()
 
-    # Create new session immediately
-    await get_client()
-    print(f"[INFO] Session reset: {old_session} -> {current_session_id}")
+    # Create new session immediately with project if provided
+    await get_client(project=project)
+    print(f"[INFO] Session reset: {old_session} -> {current_session_id} (projeto: {project})")
 
 
 def get_current_session_id() -> Optional[str]:

@@ -225,8 +225,11 @@ async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depen
             status_code=400, detail=f"Message blocked: {scan_result.threat_level.value}"
         )
 
+    # Obter projeto do header (chat-simples HTML ou chat-angular)
+    project = request.headers.get("X-Client-Project", "chat-simples")
+
     try:
-        c = await get_client(model=chat_request.model)
+        c = await get_client(model=chat_request.model, project=project)
 
         session_specific_afs = None
         target_session_id = chat_request.session_id or app_state.current_session_id
@@ -435,23 +438,34 @@ async def chat_stream(
         project = request.headers.get("X-Client-Project", "chat-simples")
 
         # Determinar session_id a usar
+        # IMPORTANTE: Guardamos referência ao client para NÃO criar sessões desnecessárias
+        client_ref = None
+
         if chat_request.session_id:
             # Frontend enviou session_id específico - MANTER essa sessão
             target_session_id = chat_request.session_id
-            # Chamar get_client() para ter o client disponível (pode criar sessão interna diferente)
-            await get_client(model=chat_request.model)
-            # IMPORTANTE: Não substituir a sessão do usuário mesmo se modelo mudou!
-            # O usuário quer continuar na mesma conversa
-            if app_state.current_session_id != target_session_id:
-                print(
-                    f"[STREAM] Modelo diferente mas mantendo sessão do usuário: {target_session_id}"
-                )
+            # SÓ obter client se já existir, NÃO criar nova sessão
+            if app_state.client is not None:
+                client_ref = app_state.client
+                print(f"[STREAM] Reutilizando client existente para sessão: {target_session_id}")
+            else:
+                # Criar client apenas uma vez e guardar referência
+                client_ref = await get_client(model=chat_request.model, project=project)
+                # Se criou sessão diferente da solicitada, vamos limpar depois
+                if app_state.current_session_id != target_session_id:
+                    print(
+                        f"[STREAM] Client criou sessão {app_state.current_session_id}, mas usando {target_session_id}"
+                    )
         else:
-            # Sem session_id do frontend - usar get_client() para criar/obter sessão
-            # Isso garante que JSONL seja criado via ClaudeSDKClient (mesmo comportamento do /chat)
-            await get_client(model=chat_request.model)
+            # Sem session_id do frontend - CRIAR NOVA SESSÃO
+            # Isso acontece quando o usuário clica em "Novo bate-papo" e envia a primeira mensagem
+            # IMPORTANTE: Forçar criação de nova sessão mesmo se já existir um client
+            from app_state import reset_session
+
+            await reset_session(project=project)
+            client_ref = app_state.client
             target_session_id = app_state.current_session_id
-            print(f"[STREAM] Usando sessão do get_client: {target_session_id}")
+            print(f"[STREAM] Nova sessão criada: {target_session_id} (projeto: {project})")
 
         # Abrir AgentFS para salvar histórico (não usar ClaudeRAG para evitar JSONL duplicado)
         afs = await AgentFS.open(AgentFSOptions(id=target_session_id))
@@ -518,7 +532,7 @@ async def chat_stream(
             return StreamingResponse(generate_command_response(), media_type="text/event-stream")
 
         async def generate():
-            nonlocal afs
+            nonlocal afs, client_ref
             full_response = ""
             call_id = None
             try:
@@ -527,8 +541,9 @@ async def chat_stream(
                 # Registrar tool call para auditoria (mesmo comportamento do /chat)
                 call_id = await afs.tools.start("chat", {"message": chat_request.message[:100]})
 
-                # Usar o client do app_state
-                client = await get_client(model=chat_request.model)
+                # IMPORTANTE: Usar client_ref já obtido, NÃO chamar get_client() novamente
+                # Isso evita criar sessões duplicadas
+                client = client_ref
 
                 # Buscar contexto RAG para enriquecer a resposta
                 rag_context = await search_rag_context(chat_request.message)
@@ -577,20 +592,20 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                     await afs.kv.set("conversation:history", history[-100:])
                     print(f"[STREAM] Histórico salvo: {len(history)} mensagens")
 
-                    # Auto-rename: definir título com primeiras 3 palavras na primeira mensagem
-                    if len(history) <= 2:  # Primeira mensagem (user + assistant)
-                        try:
-                            existing_title = await afs.kv.get("session:title")
-                            if not existing_title:
-                                # Extrair primeiras 3 palavras da mensagem do usuário
-                                words = chat_request.message.strip().split()[:3]
-                                auto_title = " ".join(words)
-                                if len(auto_title) > 50:
-                                    auto_title = auto_title[:50]
-                                await afs.kv.set("session:title", auto_title)
-                                print(f"[STREAM] Auto-título definido: {auto_title}")
-                        except Exception as title_err:
-                            print(f"[WARN] Erro ao definir auto-título: {title_err}")
+                    # Auto-rename: definir título se não existir
+                    # Sempre verifica, não apenas na primeira mensagem
+                    try:
+                        existing_title = await afs.kv.get("session:title")
+                        if not existing_title:
+                            # Extrair primeiras 3 palavras da mensagem do usuário
+                            words = chat_request.message.strip().split()[:3]
+                            auto_title = " ".join(words)
+                            if len(auto_title) > 50:
+                                auto_title = auto_title[:50]
+                            await afs.kv.set("session:title", auto_title)
+                            print(f"[STREAM] Auto-título definido: {auto_title}")
+                    except Exception as title_err:
+                        print(f"[WARN] Erro ao definir auto-título: {title_err}")
                 except Exception as save_err:
                     print(f"[WARN] Erro ao salvar histórico: {save_err}")
 
@@ -607,6 +622,35 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                 # Marcar tool call como sucesso (para auditoria)
                 if call_id:
                     await afs.tools.success(call_id, {"response_length": len(full_response)})
+
+                # Limpar sessão temporária se o client criou uma diferente da solicitada
+                if (
+                    chat_request.session_id
+                    and app_state.current_session_id
+                    and app_state.current_session_id != target_session_id
+                ):
+                    temp_session_id = app_state.current_session_id
+                    from app_state import AGENTFS_DIR, SESSIONS_DIR
+
+                    # Deletar arquivos da sessão temporária
+                    for pattern in [
+                        f"{temp_session_id}.db",
+                        f"{temp_session_id}.db-wal",
+                        f"{temp_session_id}.db-shm",
+                    ]:
+                        temp_file = AGENTFS_DIR / pattern
+                        if temp_file.exists():
+                            try:
+                                temp_file.unlink()
+                            except Exception:
+                                pass
+                    temp_jsonl = SESSIONS_DIR / f"{temp_session_id}.jsonl"
+                    if temp_jsonl.exists():
+                        try:
+                            temp_jsonl.unlink()
+                        except Exception:
+                            pass
+                    print(f"[STREAM] Sessão temporária {temp_session_id} removida")
 
                 yield "data: [DONE]\n\n"
             except Exception as e:
