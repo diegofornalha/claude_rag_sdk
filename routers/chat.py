@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -19,6 +20,95 @@ from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, get_limiter
 from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Chat"])
+
+
+# Padrões para detectar comandos de gerenciamento de sessão
+SESSION_COMMANDS = {
+    "favorite": [
+        r"favorit[ae]r?\b",
+        r"favorit[ae]\s+(esse|este|essa|esta)\s+(chat|conversa)",
+        r"adiciona[r]?\s+(aos|nos)\s+favoritos",
+        r"coloca[r]?\s+(nos|nos)\s+favoritos",
+        r"marca[r]?\s+como\s+favorito",
+    ],
+    "unfavorite": [
+        r"desfavorit[ae]r?\b",
+        r"tir[ae]r?\s+(dos|de)\s+favoritos",
+        r"remov[ae]r?\s+(dos|de)\s+favoritos",
+        r"desmarca[r]?\s+favorito",
+    ],
+    "rename": [
+        r"renomei?a?r?\s+(?:para\s+)?['\"]?(.+?)['\"]?\s*$",
+        r"renome\w*\s+(?:para\s+)?['\"]?(.+?)['\"]?\s*$",
+        r"muda[r]?\s+(?:o\s+)?nome\s+(?:para\s+)?['\"]?(.+?)['\"]?\s*$",
+        r"(?:chama[r]?|nomea[r]?)\s+(?:de\s+)?['\"]?(.+?)['\"]?\s*$",
+        r"(?:define|defina|coloca|coloque)\s+(?:o\s+)?(?:nome|título)\s+(?:como\s+)?['\"]?(.+?)['\"]?\s*$",
+    ],
+}
+
+
+def detect_session_command(message: str) -> tuple[str | None, str | None]:
+    """Detecta comandos de gerenciamento de sessão na mensagem.
+
+    Returns:
+        tuple: (command_type, extra_data) onde:
+            - command_type: 'favorite', 'unfavorite', 'rename' ou None
+            - extra_data: novo título para rename, ou None
+    """
+    msg_lower = message.lower().strip()
+
+    # IMPORTANTE: Verificar comandos de DESFAVORITAR ANTES de favoritar
+    # porque "desfavoritar" contém "favoritar"
+    for pattern in SESSION_COMMANDS["unfavorite"]:
+        if re.search(pattern, msg_lower, re.IGNORECASE):
+            return ("unfavorite", None)
+
+    # Verificar comandos de favoritar
+    for pattern in SESSION_COMMANDS["favorite"]:
+        if re.search(pattern, msg_lower, re.IGNORECASE):
+            return ("favorite", None)
+
+    # Verificar comandos de renomear (captura o novo nome)
+    for pattern in SESSION_COMMANDS["rename"]:
+        match = re.search(pattern, msg_lower, re.IGNORECASE)
+        if match:
+            # Extrair o novo nome do grupo de captura
+            new_name = match.group(1).strip() if match.lastindex else None
+            if new_name:
+                # Limpar aspas e espaços extras
+                new_name = new_name.strip("'\"").strip()
+                if len(new_name) > 0:
+                    return ("rename", new_name[:100])  # Limitar a 100 chars
+
+    return (None, None)
+
+
+async def execute_session_command(
+    afs, session_id: str, command: str, extra_data: str | None
+) -> str:
+    """Executa um comando de gerenciamento de sessão.
+
+    Returns:
+        Mensagem de confirmação para o usuário
+    """
+    try:
+        if command == "favorite":
+            await afs.kv.set("session:favorite", True)
+            return "✅ Chat adicionado aos favoritos!"
+
+        elif command == "unfavorite":
+            await afs.kv.set("session:favorite", False)
+            return "✅ Chat removido dos favoritos."
+
+        elif command == "rename" and extra_data:
+            await afs.kv.set("session:title", extra_data)
+            return f"✅ Chat renomeado para: **{extra_data}**"
+
+        return "❌ Comando não reconhecido."
+
+    except Exception as e:
+        print(f"[ERROR] Erro ao executar comando de sessão: {e}")
+        return f"❌ Erro ao executar comando: {str(e)}"
 
 
 def append_to_jsonl(
@@ -380,6 +470,61 @@ Responda sempre em português brasileiro."""
                 await afs.kv.set("session:project", "chat-angular")
             except Exception:
                 pass
+
+        # Detectar comandos de gerenciamento de sessão
+        command, extra_data = detect_session_command(chat_request.message)
+        if command:
+            print(f"[STREAM] Comando de sessão detectado: {command}, extra: {extra_data}")
+
+            # Fechar ClaudeRAG pois não vamos usá-lo
+            if r:
+                await r.close()
+                r = None
+
+            async def generate_command_response():
+                nonlocal afs
+                try:
+                    # Executar o comando
+                    response_text = await execute_session_command(
+                        afs, target_session_id, command, extra_data
+                    )
+
+                    # Enviar session_id no primeiro chunk
+                    yield f"data: {json.dumps({'session_id': target_session_id})}\n\n"
+
+                    # Enviar resposta
+                    yield f"data: {json.dumps({'text': response_text})}\n\n"
+
+                    # Sinalizar que sessões precisam ser recarregadas
+                    yield f"data: {json.dumps({'refresh_sessions': True, 'command': command})}\n\n"
+
+                    # Salvar no histórico
+                    try:
+                        history = await afs.kv.get("conversation:history") or []
+                        history.append({"role": "user", "content": chat_request.message})
+                        history.append({"role": "assistant", "content": response_text})
+                        await afs.kv.set("conversation:history", history[-100:])
+                    except Exception as save_err:
+                        print(f"[WARN] Erro ao salvar histórico: {save_err}")
+
+                    # Salvar no JSONL
+                    try:
+                        append_to_jsonl(
+                            session_id=target_session_id,
+                            user_message=chat_request.message,
+                            assistant_response=response_text,
+                        )
+                    except Exception as jsonl_err:
+                        print(f"[WARN] Erro ao salvar JSONL: {jsonl_err}")
+
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                finally:
+                    if afs:
+                        await afs.close()
+
+            return StreamingResponse(generate_command_response(), media_type="text/event-stream")
 
         async def generate():
             nonlocal afs
