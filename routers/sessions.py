@@ -228,24 +228,28 @@ async def list_sessions():
                 if session_id in seen_session_ids:
                     continue
 
-                # Verificar se é sessão do Claude Code (tem gitBranch no JSONL)
-                # Sessões do chat-simples/angular NÃO têm gitBranch
+                # Verificar se é sessão do Claude Code vs chat-simples/angular
+                # Sessões do chat-simples têm "chat-simples" no cwd
+                is_our_session = False
                 is_claude_code_session = False
                 message_count = 0
                 try:
                     with open(jsonl_file, "r") as f:
                         lines = f.readlines()
                         message_count = len(lines)
-                        # Verificar qualquer linha para gitBranch (pode estar na 2ª linha)
-                        for line in lines[:5]:  # Verificar primeiras 5 linhas
-                            if '"gitBranch"' in line:
-                                is_claude_code_session = True
+                        for line in lines[:5]:
+                            # Se cwd contém chat-simples, é nossa sessão
+                            if "chat-simples" in line:
+                                is_our_session = True
                                 break
+                            # Se tem gitBranch mas não é nossa, é do Claude Code
+                            if '"gitBranch"' in line and not is_our_session:
+                                is_claude_code_session = True
                 except (OSError, IOError):
                     pass  # File read failed, continue with count=0
 
-                # Ignorar sessões do Claude Code que não têm DB correspondente
-                if is_claude_code_session:
+                # Ignorar sessões do Claude Code que não são nossas
+                if is_claude_code_session and not is_our_session:
                     continue
 
                 jsonl_stat = jsonl_file.stat()

@@ -426,12 +426,10 @@ async def chat_stream(
     if chat_request.session_id:
         validate_session_id(chat_request.session_id)
 
-    r = None
     afs = None
     is_new_session = False
     try:
         import app_state
-        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
 
         # Determinar session_id a usar
         if chat_request.session_id:
@@ -445,23 +443,7 @@ async def chat_stream(
             is_new_session = True
             print(f"[STREAM] Usando sessão do get_client: {target_session_id}")
 
-        # Configurar system_prompt com caminho correto para outputs
-        outputs_path = str(Path.cwd() / "outputs" / target_session_id)
-        system_prompt = f"""Você é um assistente RAG especializado em responder perguntas usando uma base de conhecimento.
-
-## Regras para criação de arquivos:
-- SEMPRE salve arquivos em: {outputs_path}/
-- Use nomes descritivos e extensões apropriadas (ex: relatorio.txt, dados.json)
-- NUNCA use /tmp/ ou outros diretórios
-- Confirme ao usuário o caminho completo do arquivo criado
-
-Responda sempre em português brasileiro."""
-
-        r = await ClaudeRAG.open(
-            ClaudeRAGOptions(id=target_session_id, system_prompt=system_prompt)
-        )
-
-        # Abrir AgentFS para salvar histórico
+        # Abrir AgentFS para salvar histórico (não usar ClaudeRAG para evitar JSONL duplicado)
         afs = await AgentFS.open(AgentFSOptions(id=target_session_id))
 
         # Para sessões novas, salvar projeto como chat-angular
@@ -475,11 +457,6 @@ Responda sempre em português brasileiro."""
         command, extra_data = detect_session_command(chat_request.message)
         if command:
             print(f"[STREAM] Comando de sessão detectado: {command}, extra: {extra_data}")
-
-            # Fechar ClaudeRAG pois não vamos usá-lo
-            if r:
-                await r.close()
-                r = None
 
             async def generate_command_response():
                 nonlocal afs
@@ -530,21 +507,42 @@ Responda sempre em português brasileiro."""
             nonlocal afs
             full_response = ""
             try:
-                response = await r.query(chat_request.message)
-                text = response.answer
-                full_response = text
-                chunk_size = 50
+                from claude_agent_sdk import AssistantMessage, TextBlock
+
+                # Buscar contexto RAG explicitamente (mesmo comportamento do /chat)
+                rag_context = await search_rag_context(chat_request.message)
+
+                # Construir mensagem com contexto RAG se disponível
+                if rag_context:
+                    query_message = f"""[BASE DE CONHECIMENTO - Use estas informações para responder]
+{rag_context}
+
+[MENSAGEM DO USUÁRIO]
+{chat_request.message}"""
+                    print(f"[STREAM-RAG] Contexto encontrado: {len(rag_context)} chars")
+                else:
+                    query_message = chat_request.message
+
+                # Usar o client do app_state em vez de criar novo via r.query()
+                # Isso evita criar JSONL duplicado
+                client = await get_client(model=chat_request.model)
+                await client.query(query_message)
 
                 # Enviar session_id no primeiro chunk
                 yield f"data: {json.dumps({'session_id': target_session_id})}\n\n"
 
-                for i in range(0, len(text), chunk_size):
-                    chunk = text[i : i + chunk_size]
-                    yield f"data: {json.dumps({'text': chunk})}\n\n"
-                    await asyncio.sleep(0.01)
-
-                if response.citations:
-                    yield f"data: {json.dumps({'citations': response.citations})}\n\n"
+                async for message in client.receive_response():
+                    if isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, TextBlock):
+                                text = block.text
+                                full_response += text
+                                # Enviar em chunks menores para streaming mais suave
+                                chunk_size = 50
+                                for i in range(0, len(text), chunk_size):
+                                    chunk = text[i : i + chunk_size]
+                                    yield f"data: {json.dumps({'text': chunk})}\n\n"
+                                    await asyncio.sleep(0.01)
 
                 # Salvar histórico no AgentFS
                 try:
@@ -585,7 +583,6 @@ Responda sempre em português brasileiro."""
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             finally:
-                await r.close()
                 if afs:
                     await afs.close()
 
@@ -593,8 +590,6 @@ Responda sempre em português brasileiro."""
 
     except Exception as e:
         print(f"[ERROR] Stream error: {e}")
-        if r:
-            await r.close()
         if afs:
             await afs.close()
         raise HTTPException(status_code=500, detail=str(e))
