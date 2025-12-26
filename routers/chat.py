@@ -520,8 +520,12 @@ async def chat_stream(
         async def generate():
             nonlocal afs
             full_response = ""
+            call_id = None
             try:
                 from claude_agent_sdk import AssistantMessage, TextBlock
+
+                # Registrar tool call para auditoria (mesmo comportamento do /chat)
+                call_id = await afs.tools.start("chat", {"message": chat_request.message[:100]})
 
                 # Usar o client do app_state
                 client = await get_client(model=chat_request.model)
@@ -600,8 +604,18 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                 except Exception as jsonl_err:
                     print(f"[WARN] Erro ao salvar JSONL: {jsonl_err}")
 
+                # Marcar tool call como sucesso (para auditoria)
+                if call_id:
+                    await afs.tools.success(call_id, {"response_length": len(full_response)})
+
                 yield "data: [DONE]\n\n"
             except Exception as e:
+                # Marcar tool call como erro (para auditoria)
+                if call_id:
+                    try:
+                        await afs.tools.error(call_id, str(e))
+                    except Exception:
+                        pass
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             finally:
                 if afs:
