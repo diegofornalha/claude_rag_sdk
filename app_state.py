@@ -192,7 +192,17 @@ async def get_client(
         temp_options = ClaudeRAGOptions(
             id="temp", agent_model=agent_model, system_prompt=system_prompt
         )
-        engine = AgentEngine(options=temp_options, mcp_server_path=None)
+
+        # ATIVAR SERVIDORES MCP NEO4J: Passar configuração para o Claude SDK
+        mcp_config_path = Path.home() / ".mcp.json"
+        mcp_path_str = str(mcp_config_path) if mcp_config_path.exists() else None
+
+        if mcp_path_str:
+            print(f"[MCP] Carregando servidores MCP de: {mcp_path_str}")
+        else:
+            print("[MCP] Arquivo .mcp.json não encontrado - MCP servers desabilitados")
+
+        engine = AgentEngine(options=temp_options, mcp_server_path=mcp_path_str)
         client_options = engine._get_agent_options()
 
         # Adicionar hooks nativos do SDK para auditoria automática
