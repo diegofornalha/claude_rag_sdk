@@ -343,21 +343,17 @@ async def chat_stream(
         import app_state
         from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
 
-        # Usar session_id do frontend ou current_session_id, ou gerar novo
+        # Determinar session_id a usar
         if chat_request.session_id:
+            # Frontend enviou session_id específico - usar esse
             target_session_id = chat_request.session_id
-        elif app_state.current_session_id:
-            target_session_id = app_state.current_session_id
         else:
-            # Nova sessão - gerar UUID
-            target_session_id = str(uuid.uuid4())
+            # Sem session_id do frontend - usar get_client() para criar/obter sessão
+            # Isso garante que JSONL seja criado via ClaudeSDKClient (mesmo comportamento do /chat)
+            await get_client(model=chat_request.model)
+            target_session_id = app_state.current_session_id
             is_new_session = True
-            print(f"[STREAM] Nova sessão criada: {target_session_id}")
-
-            # Criar arquivo JSONL vazio para nova sessão
-            SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-            jsonl_file = SESSIONS_DIR / f"{target_session_id}.jsonl"
-            jsonl_file.touch()
+            print(f"[STREAM] Usando sessão do get_client: {target_session_id}")
 
         r = await ClaudeRAG.open(ClaudeRAGOptions(id=target_session_id))
 

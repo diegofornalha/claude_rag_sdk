@@ -40,29 +40,53 @@ current_model: str = "haiku"  # Modelo atual: haiku, sonnet, opus
 # =============================================================================
 
 
-def extract_session_id_from_jsonl() -> Optional[str]:
-    """Extrai session_id do arquivo JSONL mais recente."""
+def extract_session_id_from_jsonl(min_timestamp: Optional[float] = None) -> Optional[str]:
+    """Extrai session_id do arquivo JSONL mais recente.
+
+    Args:
+        min_timestamp: Se fornecido, ignora arquivos criados ANTES deste timestamp.
+                      Isso evita pegar JSONLs de sessões anteriores quando há
+                      múltiplas sessões sendo criadas em paralelo.
+    """
     if not SESSIONS_DIR.exists():
         return None
 
-    jsonl_files = sorted(
-        SESSIONS_DIR.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True
-    )
+    # Filtrar arquivos agent-* (sessões internas do Claude Code)
+    all_files = list(SESSIONS_DIR.glob("*.jsonl"))
+    jsonl_files = [f for f in all_files if not f.name.startswith("agent-")]
+
+    # Se min_timestamp fornecido, filtrar apenas arquivos criados APÓS
+    if min_timestamp:
+        jsonl_files = [f for f in jsonl_files if f.stat().st_mtime >= min_timestamp]
+
+    # Ordenar por tempo de modificação (mais recente primeiro)
+    jsonl_files = sorted(jsonl_files, key=lambda f: f.stat().st_mtime, reverse=True)
 
     if not jsonl_files:
         return None
 
     latest_jsonl = jsonl_files[0]
+
+    # Usar nome do arquivo como session_id (mais confiável que ler conteúdo)
+    # O ClaudeSDKClient pode criar o arquivo vazio primeiro e preencher depois
+    session_id = latest_jsonl.stem
+
+    # Tentar validar lendo o conteúdo (opcional)
     try:
         with open(latest_jsonl, "r") as f:
             first_line = f.readline().strip()
             if first_line:
                 data = json.loads(first_line)
-                return data.get("sessionId", latest_jsonl.stem)
+                # Verificar se sessionId no conteúdo bate com nome do arquivo
+                content_session_id = data.get("sessionId")
+                if content_session_id and content_session_id != session_id:
+                    print(
+                        f"[WARN] sessionId mismatch: file={session_id}, content={content_session_id}"
+                    )
     except (OSError, IOError, json.JSONDecodeError):
-        return latest_jsonl.stem  # Fallback to filename if parse fails
+        pass  # Ignorar erros de leitura, usar nome do arquivo
 
-    return None
+    return session_id
 
 
 def _get_agent_model(model_name: str) -> tuple[AgentModel, str]:
@@ -158,16 +182,33 @@ async def get_client(model: Optional[str] = None) -> ClaudeSDKClient:
         engine = AgentEngine(options=temp_options, mcp_server_path=None)
         client_options = engine._get_agent_options()
 
+        # Guardar timestamp ANTES de criar o client
+        # Isso garante que pegaremos apenas o JSONL criado por ESTE client
+        before_timestamp = time.time()
+
         client = ClaudeSDKClient(options=client_options)
         await client.__aenter__()
 
-        await asyncio.sleep(0.3)
+        # Retry loop para aguardar criação do JSONL
+        # ClaudeSDKClient pode demorar para criar o arquivo
+        new_session_id = None
+        for attempt in range(10):  # Máximo 5 segundos (10 x 0.5s)
+            await asyncio.sleep(0.5)
 
-        # SEMPRE extrair novo session_id do client recém-criado
-        # Não reutilizar sessões antigas pois podem ter outro modelo
-        new_session_id = extract_session_id_from_jsonl()
+            # Extrair session_id do JSONL criado APÓS o timestamp
+            new_session_id = extract_session_id_from_jsonl(min_timestamp=before_timestamp)
+            if new_session_id:
+                print(f"[INFO] Session ID encontrado na tentativa {attempt + 1}: {new_session_id}")
+                break
+
         if not new_session_id:
-            raise RuntimeError("Failed to extract session_id from ClaudeSDKClient")
+            # Fallback: tentar sem filtro de timestamp
+            new_session_id = extract_session_id_from_jsonl()
+            if new_session_id:
+                print(f"[WARN] Usando fallback para session_id: {new_session_id}")
+
+        if not new_session_id:
+            raise RuntimeError("Failed to extract session_id from ClaudeSDKClient after 5s")
 
         # Fechar agentfs antigo se existir
         if agentfs is not None:

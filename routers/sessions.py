@@ -85,6 +85,7 @@ async def list_sessions():
     from agentfs_sdk import AgentFS, AgentFSOptions
 
     sessions = []
+    seen_session_ids = set()  # Para evitar duplicatas
 
     if AGENTFS_DIR.exists():
         db_files = list(AGENTFS_DIR.glob("*.db"))
@@ -97,6 +98,9 @@ async def list_sessions():
         for f in db_files:
             try:
                 f.stat()  # Verifica se existe
+                # Filtrar sessões internas do Claude Code (agent-*)
+                if f.stem.startswith("agent-"):
+                    continue
                 valid_db_files.append(f)
             except FileNotFoundError:
                 continue
@@ -150,6 +154,7 @@ async def list_sessions():
             # Verificar se arquivo ainda existe (pode ter sido deletado durante a listagem)
             try:
                 db_stat = db_file.stat()
+                seen_session_ids.add(session_id)  # Marcar como já processado
                 sessions.append(
                     {
                         "session_id": session_id,
@@ -179,12 +184,33 @@ async def list_sessions():
             try:
                 session_id = jsonl_file.stem
 
+                # Filtrar sessões internas do Claude Code (agent-*)
+                if session_id.startswith("agent-"):
+                    continue
+
+                # Evitar duplicatas (já processado como AgentFS DB)
+                if session_id in seen_session_ids:
+                    continue
+
+                # Verificar se é sessão do Claude Code (tem gitBranch no JSONL)
+                # Sessões do chat-simples/angular NÃO têm gitBranch
+                is_claude_code_session = False
                 message_count = 0
                 try:
                     with open(jsonl_file, "r") as f:
-                        message_count = len(f.readlines())
+                        lines = f.readlines()
+                        message_count = len(lines)
+                        # Verificar qualquer linha para gitBranch (pode estar na 2ª linha)
+                        for line in lines[:5]:  # Verificar primeiras 5 linhas
+                            if '"gitBranch"' in line:
+                                is_claude_code_session = True
+                                break
                 except (OSError, IOError):
                     pass  # File read failed, continue with count=0
+
+                # Ignorar sessões do Claude Code que não têm DB correspondente
+                if is_claude_code_session:
+                    continue
 
                 jsonl_stat = jsonl_file.stat()
                 sessions.append(
