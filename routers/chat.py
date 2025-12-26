@@ -355,7 +355,21 @@ async def chat_stream(
             is_new_session = True
             print(f"[STREAM] Usando sessão do get_client: {target_session_id}")
 
-        r = await ClaudeRAG.open(ClaudeRAGOptions(id=target_session_id))
+        # Configurar system_prompt com caminho correto para outputs
+        outputs_path = str(Path.cwd() / "outputs" / target_session_id)
+        system_prompt = f"""Você é um assistente RAG especializado em responder perguntas usando uma base de conhecimento.
+
+## Regras para criação de arquivos:
+- SEMPRE salve arquivos em: {outputs_path}/
+- Use nomes descritivos e extensões apropriadas (ex: relatorio.txt, dados.json)
+- NUNCA use /tmp/ ou outros diretórios
+- Confirme ao usuário o caminho completo do arquivo criado
+
+Responda sempre em português brasileiro."""
+
+        r = await ClaudeRAG.open(
+            ClaudeRAGOptions(id=target_session_id, system_prompt=system_prompt)
+        )
 
         # Abrir AgentFS para salvar histórico
         afs = await AgentFS.open(AgentFSOptions(id=target_session_id))

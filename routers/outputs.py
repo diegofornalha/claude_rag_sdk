@@ -13,7 +13,11 @@ router = APIRouter(prefix="/outputs", tags=["Outputs"])
 
 @router.get("")
 async def list_outputs(directory: str = "outputs", session_id: str = None):
-    """List output files from physical filesystem."""
+    """List output files from physical filesystem.
+
+    When session_id is provided, lists files from outputs/{session_id}/.
+    When session_id is not provided, lists ALL files from ALL sessions recursively.
+    """
     try:
         # Validate inputs
         validate_directory_path(directory, allowed_prefixes=["outputs", "/outputs"])
@@ -32,16 +36,50 @@ async def list_outputs(directory: str = "outputs", session_id: str = None):
             }
 
         files = []
-        for file in outputs_dir.iterdir():
-            if file.is_file():
-                stat = file.stat()
-                files.append(
-                    {
-                        "name": file.name,
-                        "size": stat.st_size,
-                        "modified": stat.st_mtime * 1000,
-                    }
-                )
+
+        if session_id:
+            # List files from specific session directory
+            for file in outputs_dir.iterdir():
+                if file.is_file():
+                    stat = file.stat()
+                    files.append(
+                        {
+                            "name": file.name,
+                            "size": stat.st_size,
+                            "modified": stat.st_mtime * 1000,
+                            "session_id": session_id,
+                            "path": f"{session_id}/{file.name}",
+                        }
+                    )
+        else:
+            # List ALL files from ALL session subdirectories recursively
+            for session_dir in outputs_dir.iterdir():
+                if session_dir.is_dir():
+                    sid = session_dir.name
+                    for file in session_dir.iterdir():
+                        if file.is_file():
+                            stat = file.stat()
+                            files.append(
+                                {
+                                    "name": file.name,
+                                    "size": stat.st_size,
+                                    "modified": stat.st_mtime * 1000,
+                                    "session_id": sid,
+                                    "path": f"{sid}/{file.name}",
+                                }
+                            )
+                elif session_dir.is_file():
+                    # Also include files in root outputs/ directory
+                    stat = session_dir.stat()
+                    files.append(
+                        {
+                            "name": session_dir.name,
+                            "size": stat.st_size,
+                            "modified": stat.st_mtime * 1000,
+                            "session_id": None,
+                            "path": session_dir.name,
+                        }
+                    )
 
         files.sort(key=lambda f: f["modified"], reverse=True)
         return {
