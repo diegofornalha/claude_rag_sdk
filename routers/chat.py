@@ -217,7 +217,7 @@ class ChatResponse(BaseModel):
 async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depends(verify_api_key)):
     """Chat with RAG-powered AI."""
     from agentfs_sdk import AgentFS, AgentFSOptions
-    from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, ToolUseBlock
+    from claude_agent_sdk import AssistantMessage, TextBlock, ToolUseBlock
 
     import app_state
 
@@ -254,8 +254,6 @@ async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depen
         else:
             afs = await get_agentfs()
 
-        call_id = await afs.tools.start("chat", {"message": chat_request.message[:100]})
-
         # Buscar contexto RAG
         rag_context = await search_rag_context(chat_request.message)
 
@@ -284,7 +282,6 @@ Pergunta do usuário: {chat_request.message}"""
         await c.query(context_message)
 
         response_text = ""
-        tool_calls = {}
 
         async for message in c.receive_response():
             if isinstance(message, AssistantMessage):
@@ -292,42 +289,11 @@ Pergunta do usuário: {chat_request.message}"""
                     if isinstance(block, TextBlock):
                         response_text += block.text
                     elif isinstance(block, ToolUseBlock):
-                        tool_call_id = await afs.tools.start(
-                            block.name, {"input": str(block.input)[:500]}
-                        )
-                        tool_calls[block.id] = tool_call_id
                         print(f"[TOOL] {block.name} (id: {block.id})")
-                    elif isinstance(block, ToolResultBlock):
-                        if block.tool_use_id in tool_calls:
-                            await afs.tools.success(
-                                tool_calls[block.tool_use_id],
-                                {"result": str(block.content)[:500]},
-                            )
-
-        for tool_use_id, tool_call_id in tool_calls.items():
-            await afs.tools.success(tool_call_id, {"status": "completed_by_sdk"})
-
-        await afs.tools.success(call_id, {"response_length": len(response_text)})
+                        # Hooks SDK registram automaticamente
 
         history = await afs.kv.get("conversation:history") or []
         history.append({"role": "user", "content": chat_request.message})
-
-        for tool_use_id, tool_call_id in tool_calls.items():
-            history.append(
-                {
-                    "role": "assistant",
-                    "content": f"[Tool Call: {tool_use_id}]",
-                    "type": "tool_use",
-                }
-            )
-            history.append(
-                {
-                    "role": "tool",
-                    "content": f"[Tool Result: {tool_use_id}]",
-                    "type": "tool_result",
-                }
-            )
-
         history.append({"role": "assistant", "content": response_text})
         await afs.kv.set("conversation:history", history[-100:])
 
