@@ -24,7 +24,13 @@ env/
 
 # Logs
 *.log
+*.log.*
 /tmp/
+
+# Cache files
+data/.backend_ingest_cache.json
+data/.sdk_ingest_cache.json
+data/*_cache.json
 
 # OS
 .DS_Store
