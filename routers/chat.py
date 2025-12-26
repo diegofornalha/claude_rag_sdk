@@ -204,6 +204,8 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     model: Optional[str] = "haiku"  # haiku, sonnet, opus
+    resume: Optional[bool] = False  # Resume previous conversation context
+    fork_session: Optional[bool] = False  # Fork instead of continue
 
 
 class ChatResponse(BaseModel):
@@ -229,7 +231,14 @@ async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depen
     project = request.headers.get("X-Client-Project", "chat-simples")
 
     try:
-        c = await get_client(model=chat_request.model, project=project)
+        # Configurar resume se solicitado
+        resume_id = chat_request.session_id if chat_request.resume else None
+        c = await get_client(
+            model=chat_request.model,
+            project=project,
+            resume_session=resume_id,
+            fork_session=chat_request.fork_session,
+        )
 
         session_specific_afs = None
         target_session_id = chat_request.session_id or app_state.current_session_id
@@ -449,8 +458,14 @@ async def chat_stream(
                 client_ref = app_state.client
                 print(f"[STREAM] Reutilizando client existente para sessão: {target_session_id}")
             else:
-                # Criar client apenas uma vez e guardar referência
-                client_ref = await get_client(model=chat_request.model, project=project)
+                # Criar client com resume se solicitado
+                resume_id = target_session_id if chat_request.resume else None
+                client_ref = await get_client(
+                    model=chat_request.model,
+                    project=project,
+                    resume_session=resume_id,
+                    fork_session=chat_request.fork_session,
+                )
                 # Se criou sessão diferente da solicitada, vamos limpar depois
                 if app_state.current_session_id != target_session_id:
                     print(

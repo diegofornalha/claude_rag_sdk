@@ -111,7 +111,12 @@ def _get_agent_model(model_name: str) -> tuple[AgentModel, str]:
         return AgentModel.HAIKU, "haiku"
 
 
-async def get_client(model: Optional[str] = None, project: Optional[str] = None) -> ClaudeSDKClient:
+async def get_client(
+    model: Optional[str] = None,
+    project: Optional[str] = None,
+    resume_session: Optional[str] = None,
+    fork_session: bool = False,
+) -> ClaudeSDKClient:
     """Get ClaudeSDKClient instance (manages sessions automatically).
 
     Args:
@@ -120,6 +125,10 @@ async def get_client(model: Optional[str] = None, project: Optional[str] = None)
         project: Optional project name (e.g., 'chat-angular', 'chat-simples').
                  If provided and a new session is created, this project will be
                  saved to the session immediately.
+        resume_session: Optional session ID to resume. When provided, the SDK
+                       will load the conversation history from that session.
+        fork_session: If True and resume_session is provided, creates a new
+                     session branching from the resumed one instead of continuing it.
     """
     global client, agentfs, current_session_id, current_model
 
@@ -160,6 +169,7 @@ async def get_client(model: Optional[str] = None, project: Optional[str] = None)
 
         from claude_rag_sdk import ClaudeRAGOptions
         from claude_rag_sdk.agent import AgentEngine
+        from claude_rag_sdk.core.sdk_hooks import get_sdk_hooks_config
 
         outputs_base = str(Path.cwd() / "outputs")
         system_prompt = f"""Você é um assistente RAG especializado em responder perguntas usando uma base de conhecimento.
@@ -184,6 +194,21 @@ async def get_client(model: Optional[str] = None, project: Optional[str] = None)
         )
         engine = AgentEngine(options=temp_options, mcp_server_path=None)
         client_options = engine._get_agent_options()
+
+        # Adicionar hooks nativos do SDK para auditoria automática
+        try:
+            sdk_hooks = get_sdk_hooks_config()
+            client_options.hooks = sdk_hooks
+            print(f"[INFO] SDK Hooks configurados: {list(sdk_hooks.keys())}")
+            print(f"[DEBUG] client_options.hooks = {client_options.hooks}")
+        except Exception as e:
+            print(f"[WARN] Falha ao configurar SDK hooks: {e}")
+
+        # Configurar resume se fornecido
+        if resume_session:
+            client_options.resume = resume_session
+            client_options.fork_session = fork_session
+            print(f"[INFO] Resume configurado: {resume_session} (fork: {fork_session})")
 
         # Guardar timestamp ANTES de criar o client
         # Isso garante que pegaremos apenas o JSONL criado por ESTE client

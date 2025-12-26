@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter
 
 from app_state import AGENTFS_DIR, get_current_session_id
+from claude_rag_sdk.core.sdk_hooks import AuditEventType, get_audit_database, get_hooks_manager
 from utils.debug_parser import parse_debug_file
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
@@ -216,4 +217,131 @@ async def get_enriched_tools(session_id: str, limit: int = 50):
         "debug_available": len(debug_entries) > 0,
         "debug_total": len(debug_entries),
         "enriched": True,
+    }
+
+
+# =============================================================================
+# SDK HOOKS AUDIT ENDPOINTS
+# =============================================================================
+
+
+@router.get("/hooks/events")
+async def get_hooks_events(
+    session_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    tool_name: Optional[str] = None,
+    limit: int = 100,
+):
+    """
+    Get audit events from SDK Hooks.
+
+    Returns events logged by PreToolUse and PostToolUse hooks.
+    """
+    audit_db = get_audit_database()
+
+    # Convert string to enum if provided
+    event_type_enum = None
+    if event_type:
+        try:
+            event_type_enum = AuditEventType(event_type)
+        except ValueError:
+            return {
+                "error": f"Invalid event_type: {event_type}",
+                "valid_types": [e.value for e in AuditEventType],
+            }
+
+    events = audit_db.query_events(
+        session_id=session_id,
+        event_type=event_type_enum,
+        tool_name=tool_name,
+        limit=limit,
+    )
+
+    return {
+        "events": events,
+        "count": len(events),
+        "filters": {
+            "session_id": session_id,
+            "event_type": event_type,
+            "tool_name": tool_name,
+        },
+    }
+
+
+@router.get("/hooks/stats")
+async def get_hooks_stats(session_id: Optional[str] = None):
+    """
+    Get statistics from SDK Hooks audit database.
+
+    Returns counts by event type, blocked events, etc.
+    """
+    audit_db = get_audit_database()
+    stats = audit_db.get_stats(session_id=session_id)
+
+    return {
+        "session_id": session_id,
+        "stats": stats,
+        "hooks_active": True,
+    }
+
+
+@router.get("/hooks/blocked")
+async def get_blocked_events(session_id: Optional[str] = None, limit: int = 50):
+    """
+    Get blocked tool calls from SDK Hooks.
+
+    Returns events that were blocked by security, RBAC, or rate limiting.
+    """
+    audit_db = get_audit_database()
+
+    blocked_types = [
+        AuditEventType.TOOL_BLOCKED,
+        AuditEventType.RBAC_VIOLATION,
+        AuditEventType.RATE_LIMITED,
+        AuditEventType.SECURITY_BLOCKED,
+    ]
+
+    all_blocked = []
+    for event_type in blocked_types:
+        events = audit_db.query_events(
+            session_id=session_id,
+            event_type=event_type,
+            limit=limit,
+        )
+        all_blocked.extend(events)
+
+    # Sort by timestamp descending
+    all_blocked.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+    return {
+        "blocked_events": all_blocked[:limit],
+        "count": len(all_blocked),
+        "by_type": {
+            "security_blocked": len(
+                [e for e in all_blocked if e.get("event_type") == "security_blocked"]
+            ),
+            "rbac_violation": len(
+                [e for e in all_blocked if e.get("event_type") == "rbac_violation"]
+            ),
+            "rate_limited": len([e for e in all_blocked if e.get("event_type") == "rate_limited"]),
+            "tool_blocked": len([e for e in all_blocked if e.get("event_type") == "tool_blocked"]),
+        },
+    }
+
+
+@router.get("/hooks/rate-limit")
+async def get_rate_limit_usage(user_id: str = "default"):
+    """
+    Get current rate limit usage for a user.
+
+    Returns calls made per tool in the current window.
+    """
+    hooks_manager = get_hooks_manager()
+    usage = hooks_manager.rate_limiter.get_usage(user_id)
+
+    return {
+        "user_id": user_id,
+        "usage_by_tool": usage,
+        "max_calls_per_hour": hooks_manager.max_calls_per_hour,
+        "rate_limit_enabled": hooks_manager.enable_rate_limit,
     }
