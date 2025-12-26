@@ -6,7 +6,13 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 import app_state
-from app_state import AGENTFS_DIR, SESSIONS_DIR, get_current_session_id, reset_session
+from app_state import (
+    AGENTFS_DIR,
+    SESSIONS_DIR,
+    clear_session,
+    get_current_session_id,
+    reset_session,
+)
 from claude_rag_sdk.core.auth import verify_api_key
 from claude_rag_sdk.core.rate_limiter import get_limiter
 from utils.validators import validate_session_id
@@ -272,10 +278,11 @@ async def delete_session(session_id: str):
     # Validate session_id to prevent path traversal
     validate_session_id(session_id)
 
-    # Se for a sessão ativa, resetar para uma nova antes de deletar
+    # Se for a sessão ativa, apenas limpar (não criar nova automaticamente)
+    # Nova sessão será criada quando usuário enviar primeira mensagem
     was_active = session_id == app_state.current_session_id
     if was_active:
-        await reset_session()
+        await clear_session()
 
     deleted = []
 

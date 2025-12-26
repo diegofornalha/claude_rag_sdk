@@ -252,12 +252,11 @@ async def get_agentfs() -> AgentFS:
     return agentfs
 
 
-async def reset_session():
-    """Reset session (creates new ClaudeSDKClient + AgentFS).
+async def clear_session():
+    """Clear current session WITHOUT creating a new one.
 
-    Note: We don't try to close the old client because it causes issues
-    when called from a different asyncio task. The garbage collector
-    will handle cleanup.
+    Use this when deleting the active session - a new session will be
+    created lazily when the user sends their first message.
     """
     global client, agentfs, current_session_id
 
@@ -275,7 +274,24 @@ async def reset_session():
         agentfs = None
 
     current_session_id = None
+    print(f"[INFO] Session cleared: {old_session} (new session will be created on first message)")
 
+
+async def reset_session():
+    """Reset session (creates new ClaudeSDKClient + AgentFS).
+
+    Note: We don't try to close the old client because it causes issues
+    when called from a different asyncio task. The garbage collector
+    will handle cleanup.
+    """
+    global current_session_id
+
+    old_session = current_session_id
+
+    # Clear current session first
+    await clear_session()
+
+    # Create new session immediately
     await get_client()
     print(f"[INFO] Session reset: {old_session} -> {current_session_id}")
 
