@@ -125,6 +125,8 @@ async def list_sessions():
             session_agentfs = None
             project = "chat-simples"  # Default
             title = None  # Título customizado
+            favorite = False  # Favorito
+            assigned_project_id = None  # Projeto atribuído
             try:
                 session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
 
@@ -141,6 +143,22 @@ async def list_sessions():
                     stored_title = await session_agentfs.kv.get("session:title")
                     if stored_title:
                         title = stored_title
+                except Exception:
+                    pass
+
+                # Ler favorito
+                try:
+                    stored_favorite = await session_agentfs.kv.get("session:favorite")
+                    if stored_favorite is not None:
+                        favorite = stored_favorite
+                except Exception:
+                    pass
+
+                # Ler projeto atribuído
+                try:
+                    stored_project_id = await session_agentfs.kv.get("session:project_id")
+                    if stored_project_id:
+                        assigned_project_id = stored_project_id
                 except Exception:
                     pass
 
@@ -168,6 +186,8 @@ async def list_sessions():
                     {
                         "session_id": session_id,
                         "title": title,  # Título customizado (pode ser None)
+                        "favorite": favorite,  # Favorito
+                        "project_id": assigned_project_id,  # Projeto atribuído
                         "file": f"{project}/{session_id}",
                         "file_name": session_id,
                         "db_file": str(db_file),
@@ -309,7 +329,7 @@ async def delete_session(session_id: str):
 
 @router.patch("/sessions/{session_id}")
 async def update_session(session_id: str, request: Request):
-    """Update session metadata (e.g., title)."""
+    """Update session metadata (title, favorite, project_id)."""
     from agentfs_sdk import AgentFS, AgentFSOptions
 
     validate_session_id(session_id)
@@ -319,18 +339,54 @@ async def update_session(session_id: str, request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    # Verificar se há pelo menos um campo para atualizar
     title = body.get("title")
-    if not title or not isinstance(title, str):
-        raise HTTPException(status_code=400, detail="Title is required")
+    favorite = body.get("favorite")
+    project_id = body.get("project_id")
 
-    # Limitar tamanho do título
-    title = title.strip()[:100]
+    if title is None and favorite is None and project_id is None:
+        raise HTTPException(
+            status_code=400, detail="At least one field required: title, favorite, project_id"
+        )
 
     session_agentfs = None
+    result = {"success": True, "session_id": session_id}
+
     try:
         session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
-        await session_agentfs.kv.set("session:title", title)
-        return {"success": True, "session_id": session_id, "title": title}
+
+        # Atualizar título
+        if title is not None:
+            if not isinstance(title, str):
+                raise HTTPException(status_code=400, detail="Title must be a string")
+            title = title.strip()[:100]
+            await session_agentfs.kv.set("session:title", title)
+            result["title"] = title
+
+        # Atualizar favorito
+        if favorite is not None:
+            if not isinstance(favorite, bool):
+                raise HTTPException(status_code=400, detail="Favorite must be a boolean")
+            await session_agentfs.kv.set("session:favorite", favorite)
+            result["favorite"] = favorite
+
+        # Atualizar projeto
+        if project_id is not None:
+            if project_id and not isinstance(project_id, str):
+                raise HTTPException(status_code=400, detail="Project ID must be a string or null")
+            if project_id:
+                await session_agentfs.kv.set("session:project_id", project_id)
+            else:
+                # Remover do projeto (null)
+                try:
+                    await session_agentfs.kv.delete("session:project_id")
+                except Exception:
+                    pass  # Ignorar se não existir
+            result["project_id"] = project_id
+
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update session: {e}")
     finally:

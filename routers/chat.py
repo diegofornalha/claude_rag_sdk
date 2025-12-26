@@ -394,6 +394,21 @@ async def chat_stream(
                     history.append({"role": "assistant", "content": full_response})
                     await afs.kv.set("conversation:history", history[-100:])
                     print(f"[STREAM] Histórico salvo: {len(history)} mensagens")
+
+                    # Auto-rename: definir título com primeiras 3 palavras na primeira mensagem
+                    if len(history) <= 2:  # Primeira mensagem (user + assistant)
+                        try:
+                            existing_title = await afs.kv.get("session:title")
+                            if not existing_title:
+                                # Extrair primeiras 3 palavras da mensagem do usuário
+                                words = chat_request.message.strip().split()[:3]
+                                auto_title = " ".join(words)
+                                if len(auto_title) > 50:
+                                    auto_title = auto_title[:50]
+                                await afs.kv.set("session:title", auto_title)
+                                print(f"[STREAM] Auto-título definido: {auto_title}")
+                        except Exception as title_err:
+                            print(f"[WARN] Erro ao definir auto-título: {title_err}")
                 except Exception as save_err:
                     print(f"[WARN] Erro ao salvar histórico: {save_err}")
 
