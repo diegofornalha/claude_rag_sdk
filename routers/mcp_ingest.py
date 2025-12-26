@@ -362,6 +362,32 @@ async def _run_ingest_task(
         # Obtém engine de ingestão
         engine = await _get_rag_engine()
 
+        # CORREÇÃO: Deletar documentos do adapter ANTES de reingerir (evita duplicação)
+        if adapter_name == "angular-cli":
+            try:
+                from claude_rag_sdk import ClaudeRAG
+
+                # Abrir RAG para deletar documentos Angular antigos
+                rag_options = engine.options
+                async with ClaudeRAG.open(rag_options) as rag:
+                    all_docs = await rag.list_documents(limit=1000)
+                    angular_docs = [
+                        d
+                        for d in all_docs
+                        if "angular" in (d.get("source", "") or "").lower()
+                        or "angular-cli-mcp" in (d.get("source", "") or "").lower()
+                    ]
+
+                    deleted_count = 0
+                    for doc in angular_docs:
+                        doc_id = doc.get("id")
+                        if doc_id and await rag.ingest.delete_document(doc_id):
+                            deleted_count += 1
+
+                    logger.info(f"Deleted {deleted_count} old Angular documents before reingest")
+            except Exception as e:
+                logger.warning(f"Error deleting old Angular docs: {e}")
+
         # Ingere cada documento
         for doc in documents:
             try:

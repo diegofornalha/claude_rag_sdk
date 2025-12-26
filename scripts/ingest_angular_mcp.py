@@ -224,8 +224,39 @@ async def run_ingest(
         chunk_overlap=150,
     )
 
+    # CORREÇÃO: Deletar documentos Angular antigos ANTES de reingerir
+    print("\n  Deletando documentos Angular antigos para evitar duplicação...\n")
+    try:
+        from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+
+        # Criar opções para o RAG
+        rag_options = ClaudeRAGOptions(id="angular-ingest", db_path=str(db_path))
+
+        # Abrir RAG para buscar e deletar
+        async with ClaudeRAG.open(rag_options) as rag:
+            # Buscar todos os documentos Angular existentes
+            all_docs = await rag.list_documents(limit=1000)
+            angular_docs = [
+                d
+                for d in all_docs
+                if "angular" in (d.get("source", "") or "").lower()
+                or "angular-cli-mcp" in (d.get("source", "") or "").lower()
+            ]
+
+            deleted_count = 0
+            for doc in angular_docs:
+                doc_id = doc.get("id")
+                if doc_id:
+                    success = await rag.ingest.delete_document(doc_id)
+                    if success:
+                        deleted_count += 1
+
+            print(f"    ✓ {deleted_count} documento(s) Angular antigo(s) deletado(s)\n")
+    except Exception as e:
+        print(f"    ⚠ Aviso ao deletar antigos: {e}\n")
+
     # Ingere documentos
-    print("\n  Ingerindo documentos no RAG...\n")
+    print("  Ingerindo novos documentos no RAG...\n")
 
     success_count = 0
     error_count = 0
