@@ -1,0 +1,88 @@
+# =============================================================================
+# DOCKERIGNORE - Claude RAG SDK Backend
+# =============================================================================
+# Excluir arquivos desnecessários do build Docker
+# =============================================================================
+
+# Git
+.git
+.gitignore
+.gitmodules
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info
+dist/
+build/
+eggs/
+.eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Linting
+.ruff_cache/
+.mypy_cache/
+
+# Environment files (secrets!)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Outputs e dados locais (montados como volumes)
+outputs/
+data/
+.agentfs/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests (não necessários em prod)
+tests/
+*_test.py
+test_*.py
+
+# Examples
+examples/
+
+# Submodules (se não necessário)
+agentfs/
+
+# Misc
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db

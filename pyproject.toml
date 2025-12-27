@@ -53,7 +53,12 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.12.0",
+    "pytest-timeout>=2.2.0",
+    "httpx>=0.25.0",
     "ruff>=0.4.0",
+    "pip-audit>=2.6.0",
 ]
 reranking = [
     "sentence-transformers>=2.2.0",
@@ -76,8 +81,17 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = ["E501"]
+select = ["E", "F", "I", "W", "S", "B", "C4", "UP"]
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "S101",   # Assert used (ok in tests)
+    "S104",   # Possible binding to all interfaces
+    "S105",   # Hardcoded password (false positives)
+    "S106",   # Hardcoded password (false positives)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]
 
 [tool.ruff.format]
 quote-style = "double"
