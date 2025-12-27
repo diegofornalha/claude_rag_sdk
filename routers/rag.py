@@ -125,7 +125,7 @@ async def rag_stats():
 @router.post("/reingest")
 async def reingest_backend(api_key: str = Depends(verify_api_key)):
     """Reingest backend files (run ingest_backend.py)."""
-    import subprocess
+    import asyncio
     from pathlib import Path
 
     script_path = Path(__file__).parent.parent / "scripts" / "ingest_backend.py"
@@ -134,22 +134,32 @@ async def reingest_backend(api_key: str = Depends(verify_api_key)):
         raise HTTPException(status_code=404, detail="Ingest script not found")
 
     try:
-        result = subprocess.run(
-            ["python", str(script_path)],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 min timeout
+        # Use asyncio subprocess for better compatibility with uvicorn
+        process = await asyncio.create_subprocess_exec(
+            "python",
+            str(script_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             cwd=str(script_path.parent.parent),
         )
 
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=300,  # 5 min timeout
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
+
         return {
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "error": result.stderr if result.returncode != 0 else None,
-            "returncode": result.returncode,
+            "success": process.returncode == 0,
+            "output": stdout.decode() if stdout else "",
+            "error": stderr.decode() if stderr and process.returncode != 0 else "",
+            "returncode": process.returncode,
         }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[ERROR] Reingest failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -158,7 +168,7 @@ async def reingest_backend(api_key: str = Depends(verify_api_key)):
 @router.post("/reingest/sdk")
 async def reingest_sdk(api_key: str = Depends(verify_api_key)):
     """Reingest Claude Agent SDK files (run ingest_sdk.py)."""
-    import subprocess
+    import asyncio
     from pathlib import Path
 
     script_path = Path(__file__).parent.parent / "scripts" / "ingest_sdk.py"
@@ -167,22 +177,32 @@ async def reingest_sdk(api_key: str = Depends(verify_api_key)):
         raise HTTPException(status_code=404, detail="SDK ingest script not found")
 
     try:
-        result = subprocess.run(
-            ["python", str(script_path)],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 min timeout
+        # Use asyncio subprocess for better compatibility with uvicorn
+        process = await asyncio.create_subprocess_exec(
+            "python",
+            str(script_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             cwd=str(script_path.parent.parent),
         )
 
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=300,  # 5 min timeout
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
+
         return {
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "error": result.stderr if result.returncode != 0 else None,
-            "returncode": result.returncode,
+            "success": process.returncode == 0,
+            "output": stdout.decode() if stdout else "",
+            "error": stderr.decode() if stderr and process.returncode != 0 else "",
+            "returncode": process.returncode,
         }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[ERROR] SDK reingest failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
