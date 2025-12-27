@@ -244,11 +244,19 @@ class TestSessionIdValidation:
 class TestRAGContext:
     """Testes de integração com RAG."""
 
-    @patch("routers.chat.RAG_DB_PATH")
+    @patch("routers.chat.get_config")
     @patch("routers.chat.SearchEngine")
-    async def test_rag_context_included(self, mock_engine_cls, mock_path):
+    async def test_rag_context_included(self, mock_engine_cls, mock_get_config):
         """Verifica que contexto RAG é incluído."""
         from routers.chat import search_rag_context
+
+        # Mock do config
+        mock_config = MagicMock()
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_config.rag_db_path = mock_path
+        mock_config.embedding_model_string = "BAAI/bge-small-en-v1.5"
+        mock_get_config.return_value = mock_config
 
         # Mock do engine
         mock_engine = MagicMock()
@@ -257,9 +265,6 @@ class TestRAGContext:
         mock_result.content = "Test content from RAG"
         mock_engine.search = AsyncMock(return_value=[mock_result])
         mock_engine_cls.return_value = mock_engine
-
-        # Mock do path existindo
-        mock_path.exists = MagicMock(return_value=True)
 
         # Buscar contexto
         # context = await search_rag_context("test query")

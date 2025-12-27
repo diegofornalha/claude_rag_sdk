@@ -15,11 +15,13 @@ from pydantic import BaseModel
 
 from app_state import SESSIONS_DIR, get_agentfs, get_client
 from claude_rag_sdk.core.auth import verify_api_key
+from claude_rag_sdk.core.logger import get_logger
 from claude_rag_sdk.core.prompt_guard import PromptGuard
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, get_limiter
 from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Chat"])
+logger = get_logger("chat")
 
 
 # Padrões para detectar comandos de gerenciamento de sessão
@@ -107,7 +109,9 @@ async def execute_session_command(
         return "❌ Comando não reconhecido."
 
     except Exception as e:
-        print(f"[ERROR] Erro ao executar comando de sessão: {e}")
+        logger.error(
+            "Erro ao executar comando de sessão", error_type="session_command", error=str(e)
+        )
         return f"❌ Erro ao executar comando: {str(e)}"
 
 
@@ -119,7 +123,7 @@ def append_to_jsonl(
 
     # CORREÇÃO: Criar arquivo se não existir (em vez de retornar)
     if not jsonl_file.exists():
-        print(f"[INFO] Criando arquivo JSONL para nova sessão: {session_id}")
+        logger.info("Criando arquivo JSONL para nova sessão", session_id=session_id)
         jsonl_file.parent.mkdir(parents=True, exist_ok=True)
         jsonl_file.touch()  # Criar arquivo vazio
 
@@ -162,28 +166,32 @@ def append_to_jsonl(
         with open(jsonl_file, "a") as f:
             f.write(json.dumps(user_entry, ensure_ascii=False) + "\n")
             f.write(json.dumps(assistant_entry, ensure_ascii=False) + "\n")
-        print(f"[JSONL] Appended to {session_id}.jsonl")
+        logger.debug("Mensagens salvas no JSONL", session_id=session_id)
     except Exception as e:
-        print(f"[ERROR] Failed to append to JSONL: {e}")
+        logger.error("Falha ao salvar JSONL", session_id=session_id, error=str(e))
 
 
-# RAG Knowledge base path (separado do AgentFS para evitar conflitos)
-RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
+# Config centralizada para RAG
+from claude_rag_sdk.core.config import get_config
+
 limiter = get_limiter()
 prompt_guard = PromptGuard(strict_mode=False)
 
 
 async def search_rag_context(query: str, top_k: int = 3) -> str:
     """Busca contexto relevante na base RAG."""
-    if not RAG_DB_PATH.exists():
+    config = get_config()
+    rag_db_path = config.rag_db_path
+
+    if not rag_db_path.exists():
         return ""
 
     try:
         from claude_rag_sdk.search import SearchEngine
 
         engine = SearchEngine(
-            db_path=str(RAG_DB_PATH),
-            embedding_model="BAAI/bge-small-en-v1.5",
+            db_path=str(rag_db_path),
+            embedding_model=config.embedding_model_string,
             enable_reranking=False,  # Mais rápido
         )
         results = await engine.search(query, top_k=top_k)
@@ -197,7 +205,7 @@ async def search_rag_context(query: str, top_k: int = 3) -> str:
 
         return "\n\n---\n\n".join(context_parts)
     except Exception as e:
-        print(f"[ERROR] RAG search failed: {e}")
+        logger.error("Busca RAG falhou", error=str(e))
         # Retornar mensagem de erro para o usuário saber que RAG falhou
         return "[AVISO: Busca na base de conhecimento falhou - respondendo sem contexto RAG]"
 
@@ -292,7 +300,14 @@ Pergunta do usuário: {chat_request.message}"""
                         response_text += block.text
                     elif isinstance(block, ToolUseBlock):
                         print(f"[TOOL] {block.name} (id: {block.id})")
-                        # Hooks SDK registram automaticamente
+                        # Registrar tool call no AgentFS para auditoria
+                        try:
+                            tool_call_id = await afs.tools.start(
+                                block.name, {"input": str(getattr(block, "input", {}))[:500]}
+                            )
+                            await afs.tools.success(tool_call_id, {"status": "completed"})
+                        except Exception as tool_err:
+                            print(f"[WARN] Erro ao registrar tool: {tool_err}")
 
         history = await afs.kv.get("conversation:history") or []
         history.append({"role": "user", "content": chat_request.message})
@@ -566,6 +581,20 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                                     chunk = text[i : i + chunk_size]
                                     yield f"data: {json.dumps({'text': chunk})}\n\n"
                                     await asyncio.sleep(0.01)
+                            # Registrar tool calls no AgentFS para auditoria
+                            elif hasattr(block, "name") and hasattr(block, "id"):
+                                # É um ToolUseBlock
+                                tool_name = block.name
+                                tool_input = getattr(block, "input", {})
+                                try:
+                                    tool_call_id = await afs.tools.start(
+                                        tool_name, {"input": str(tool_input)[:500]}
+                                    )
+                                    # Marcar como sucesso (não temos o resultado aqui)
+                                    await afs.tools.success(tool_call_id, {"status": "completed"})
+                                    print(f"[AUDIT] Tool registrada: {tool_name}")
+                                except Exception as tool_err:
+                                    print(f"[WARN] Erro ao registrar tool {tool_name}: {tool_err}")
 
                 # Salvar histórico no AgentFS
                 try:

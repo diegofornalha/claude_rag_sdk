@@ -7,15 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import app_state
 from claude_rag_sdk.core.auth import verify_api_key
+from claude_rag_sdk.core.config import get_config
+from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, limiter
 from utils.file_watcher import get_watcher
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
-# RAG Knowledge base path
-RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
+
+def _get_rag_db_path() -> Path:
+    """Obtém caminho do RAG database da config centralizada."""
+    return get_config().rag_db_path
 
 
 @router.post("/search")
+@limiter.limit(RATE_LIMITS.get("search", "60/minute"))
 async def rag_search(
     request: Request, query: str, top_k: int = 5, api_key: str = Depends(verify_api_key)
 ):
@@ -40,9 +45,13 @@ async def rag_search(
 
 
 @router.get("/search/test")
-async def search_test(query: str, top_k: int = 5):
+@limiter.limit(RATE_LIMITS.get("search", "60/minute"))
+async def search_test(request: Request, query: str, top_k: int = 5):
     """Test search endpoint (no auth required for testing)."""
-    if not RAG_DB_PATH.exists():
+    config = get_config()
+    rag_db_path = config.rag_db_path
+
+    if not rag_db_path.exists():
         return {
             "query": query,
             "results": [],
@@ -55,8 +64,8 @@ async def search_test(query: str, top_k: int = 5):
         from claude_rag_sdk.search import SearchEngine
 
         engine = SearchEngine(
-            db_path=str(RAG_DB_PATH),
-            embedding_model="BAAI/bge-small-en-v1.5",
+            db_path=str(rag_db_path),
+            embedding_model=config.embedding_model_string,
             enable_reranking=False,
         )
 
@@ -85,6 +94,7 @@ async def search_test(query: str, top_k: int = 5):
 
 
 @router.post("/ingest")
+@limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
 async def rag_ingest(
     request: Request, content: str, source: str, api_key: str = Depends(verify_api_key)
 ):
@@ -105,7 +115,8 @@ async def rag_ingest(
 
 
 @router.get("/stats")
-async def rag_stats():
+@limiter.limit(RATE_LIMITS.get("default", "60/minute"))
+async def rag_stats(request: Request):
     """Get RAG statistics."""
     from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
 
@@ -123,7 +134,8 @@ async def rag_stats():
 
 
 @router.post("/reingest")
-async def reingest_backend(api_key: str = Depends(verify_api_key)):
+@limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
+async def reingest_backend(request: Request, api_key: str = Depends(verify_api_key)):
     """Reingest backend files (run ingest_backend.py)."""
     import asyncio
     from pathlib import Path
@@ -166,7 +178,8 @@ async def reingest_backend(api_key: str = Depends(verify_api_key)):
 
 
 @router.post("/reingest/sdk")
-async def reingest_sdk(api_key: str = Depends(verify_api_key)):
+@limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
+async def reingest_sdk(request: Request, api_key: str = Depends(verify_api_key)):
     """Reingest Claude Agent SDK files (run ingest_sdk.py)."""
     import asyncio
     from pathlib import Path
@@ -209,11 +222,14 @@ async def reingest_sdk(api_key: str = Depends(verify_api_key)):
 
 
 @router.get("/config")
-async def rag_config():
+@limiter.limit(RATE_LIMITS.get("default", "60/minute"))
+async def rag_config(request: Request):
     """Get RAG configuration and statistics."""
+    config = get_config()
+    rag_db_path = config.rag_db_path
 
-    db_exists = RAG_DB_PATH.exists()
-    db_size = RAG_DB_PATH.stat().st_size if db_exists else 0
+    db_exists = rag_db_path.exists()
+    db_size = rag_db_path.stat().st_size if db_exists else 0
 
     stats = {
         "total_documents": 0,
@@ -228,7 +244,8 @@ async def rag_config():
             from claude_rag_sdk.ingest import IngestEngine
 
             engine = IngestEngine(
-                db_path=str(RAG_DB_PATH), embedding_model="BAAI/bge-small-en-v1.5"
+                db_path=str(rag_db_path),
+                embedding_model=config.embedding_model_string,
             )
             stats = engine.stats
         except Exception as e:
@@ -238,14 +255,14 @@ async def rag_config():
             del engine
 
     return {
-        "db_path": str(RAG_DB_PATH),
+        "db_path": str(rag_db_path),
         "db_exists": db_exists,
         "db_size_bytes": db_size,
         "db_size_human": _format_size(db_size),
         "stats": stats,
-        "embedding_model": "BAAI/bge-small-en-v1.5",
-        "chunk_size": 500,
-        "chunk_overlap": 50,
+        "embedding_model": config.embedding_model_string,
+        "chunk_size": config.chunk_size,
+        "chunk_overlap": config.chunk_overlap,
     }
 
 
@@ -291,8 +308,9 @@ async def watcher_stop(api_key: str = Depends(verify_api_key)):
 @router.delete("/reset")
 async def rag_reset(api_key: str = Depends(verify_api_key)):
     """Delete RAG database and reset to empty state."""
+    rag_db_path = get_config().rag_db_path
 
-    if not RAG_DB_PATH.exists():
+    if not rag_db_path.exists():
         return {
             "success": True,
             "message": "Database already empty",
@@ -302,13 +320,13 @@ async def rag_reset(api_key: str = Depends(verify_api_key)):
     deleted = []
     try:
         # Delete main DB file
-        if RAG_DB_PATH.exists():
-            os.remove(RAG_DB_PATH)
-            deleted.append(str(RAG_DB_PATH))
+        if rag_db_path.exists():
+            os.remove(rag_db_path)
+            deleted.append(str(rag_db_path))
 
         # Delete WAL and SHM files if they exist
-        wal_path = RAG_DB_PATH.with_suffix(".db-wal")
-        shm_path = RAG_DB_PATH.with_suffix(".db-shm")
+        wal_path = rag_db_path.with_suffix(".db-wal")
+        shm_path = rag_db_path.with_suffix(".db-shm")
 
         if wal_path.exists():
             os.remove(wal_path)
@@ -347,11 +365,13 @@ async def list_documents(limit: int = 50, offset: int = 0):
     import json
     import sqlite3
 
-    if not RAG_DB_PATH.exists():
+    rag_db_path = get_config().rag_db_path
+
+    if not rag_db_path.exists():
         return {"documents": [], "total": 0}
 
     try:
-        with sqlite3.connect(str(RAG_DB_PATH)) as conn:
+        with sqlite3.connect(str(rag_db_path)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
@@ -408,11 +428,13 @@ async def get_document(doc_id: int):
     import json
     import sqlite3
 
-    if not RAG_DB_PATH.exists():
+    rag_db_path = get_config().rag_db_path
+
+    if not rag_db_path.exists():
         raise HTTPException(status_code=404, detail="RAG database not found")
 
     try:
-        with sqlite3.connect(str(RAG_DB_PATH)) as conn:
+        with sqlite3.connect(str(rag_db_path)) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
@@ -454,12 +476,14 @@ async def delete_document(doc_id: int, api_key: str = Depends(verify_api_key)):
     import apsw
     import sqlite_vec
 
-    if not RAG_DB_PATH.exists():
+    rag_db_path = get_config().rag_db_path
+
+    if not rag_db_path.exists():
         raise HTTPException(status_code=404, detail="RAG database not found")
 
     conn = None
     try:
-        conn = apsw.Connection(str(RAG_DB_PATH))
+        conn = apsw.Connection(str(rag_db_path))
         conn.enableloadextension(True)
         conn.loadextension(sqlite_vec.loadable_path())
         conn.enableloadextension(False)

@@ -2,17 +2,19 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 import app_state
 from app_state import get_agentfs
+from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, limiter
 from utils.validators import validate_directory_path, validate_filename, validate_session_id
 
 router = APIRouter(prefix="/outputs", tags=["Outputs"])
 
 
 @router.get("")
-async def list_outputs(directory: str = "outputs", session_id: str = None):
+@limiter.limit(RATE_LIMITS.get("default", "60/minute"))
+async def list_outputs(request: Request, directory: str = "outputs", session_id: str = None):
     """List output files from physical filesystem.
 
     When session_id is provided, lists files from outputs/{session_id}/.
@@ -98,7 +100,8 @@ async def list_outputs(directory: str = "outputs", session_id: str = None):
 
 
 @router.get("/file/{filename:path}")
-async def get_output_file(filename: str):
+@limiter.limit(RATE_LIMITS.get("default", "60/minute"))
+async def get_output_file(request: Request, filename: str):
     """Get output file content from AgentFS filesystem."""
     # Validate filename to prevent path traversal
     validate_filename(filename)
@@ -119,7 +122,10 @@ async def get_output_file(filename: str):
 
 
 @router.post("/write")
-async def write_output_file(filename: str, content: str, directory: str = "/outputs"):
+@limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
+async def write_output_file(
+    request: Request, filename: str, content: str, directory: str = "/outputs"
+):
     """Write file to AgentFS filesystem."""
     # Validate inputs to prevent path traversal
     validate_filename(filename)
@@ -141,7 +147,8 @@ async def write_output_file(filename: str, content: str, directory: str = "/outp
 
 
 @router.delete("/{filename:path}")
-async def delete_output(filename: str):
+@limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
+async def delete_output(request: Request, filename: str):
     """Delete file from physical filesystem (outputs/ directory)."""
     # Validate filename to prevent path traversal
     validate_filename(filename)

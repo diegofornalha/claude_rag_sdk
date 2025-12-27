@@ -13,12 +13,17 @@ Production-ready FastAPI server with:
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 import app_state
 from claude_rag_sdk.core.auth import is_auth_enabled
+from claude_rag_sdk.core.exceptions import RAGException
+from claude_rag_sdk.core.logger import get_logger
 from claude_rag_sdk.core.rate_limiter import SLOWAPI_AVAILABLE
+
+logger = get_logger("server")
 from routers import (
     audit_router,
     chat_router,
@@ -40,7 +45,7 @@ from routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage app lifecycle."""
-    print("[INFO] Starting Chat Simples...")
+    logger.info("Starting Chat Simples...")
     yield
     # Cleanup watcher before app_state
     try:
@@ -50,15 +55,62 @@ async def lifespan(app: FastAPI):
         if watcher.is_active():
             watcher.stop()
     except Exception as e:
-        print(f"[WARN] Error stopping watcher: {e}")
+        logger.warning("Error stopping watcher", error=str(e))
     await app_state.cleanup()
 
 
 app = FastAPI(
-    title="Chat Simples",
-    description="Chat backend powered by Claude RAG SDK",
+    title="Claude RAG SDK API",
+    description="""
+## Chat Simples - Backend API
+
+API REST para chat com **RAG (Retrieval-Augmented Generation)** usando Claude.
+
+### Funcionalidades
+
+- 🤖 **Chat**: Conversação com streaming SSE
+- 🔍 **RAG Search**: Busca semântica em documentos
+- 📁 **Sessions**: Gerenciamento de sessões de chat
+- 📊 **Audit**: Logs de tool calls e debug
+- 📄 **Outputs**: Arquivos gerados pelo Claude
+
+### Autenticação
+
+Use o header `X-API-Key` com sua chave de API:
+
+```
+X-API-Key: sua-chave-aqui
+```
+
+### Streaming
+
+O endpoint `/chat/stream` retorna Server-Sent Events (SSE):
+
+```
+data: {"text": "Olá"}
+data: {"text": "! Como posso ajudar?"}
+data: [DONE]
+```
+""",
     version="3.0.0",
     lifespan=lifespan,
+    openapi_tags=[
+        {"name": "Chat", "description": "Endpoints de conversação com Claude"},
+        {"name": "RAG", "description": "Busca semântica e ingestão de documentos"},
+        {"name": "Sessions", "description": "Gerenciamento de sessões de chat"},
+        {"name": "Outputs", "description": "Arquivos gerados pelo Claude"},
+        {"name": "Audit", "description": "Logs de tool calls e debug"},
+        {"name": "MCP", "description": "Model Context Protocol adapters"},
+        {"name": "Health", "description": "Endpoints de status e health check"},
+    ],
+    contact={
+        "name": "Claude RAG SDK",
+        "url": "https://github.com/your-org/claude-rag-sdk",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
 )
 
 # CORS
@@ -77,6 +129,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# =============================================================================
+# EXCEPTION HANDLERS
+# =============================================================================
+
+
+@app.exception_handler(RAGException)
+async def rag_exception_handler(request: Request, exc: RAGException) -> JSONResponse:
+    """Handler para exceções customizadas do RAG.
+
+    Converte RAGException em respostas HTTP apropriadas com JSON estruturado.
+    """
+    logger.error(
+        "RAG exception occurred",
+        error_type=exc.code,
+        error_message=exc.message,
+        http_status=exc.http_status,
+        path=str(request.url.path),
+    )
+    return JSONResponse(
+        status_code=exc.http_status,
+        content=exc.to_dict(),
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handler para exceções genéricas não tratadas.
+
+    Garante que erros não capturados retornem JSON estruturado.
+    """
+    logger.error(
+        "Unhandled exception",
+        error_type=type(exc).__name__,
+        error_message=str(exc),
+        path=str(request.url.path),
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "InternalServerError",
+            "message": "Erro interno do servidor",
+            "details": {"type": type(exc).__name__},
+        },
+    )
+
 
 # Rate limiter
 if SLOWAPI_AVAILABLE:
@@ -111,9 +211,12 @@ if is_mcp_available() and mcp_router:
 # =============================================================================
 
 
-@app.get("/")
+@app.get("/", tags=["Health"])
 async def root():
-    """Health check."""
+    """Health check básico.
+
+    Retorna status do servidor e informações da sessão atual.
+    """
     env = os.getenv("ENVIRONMENT", "development")
     response = {
         "status": "ok",
@@ -133,9 +236,12 @@ async def root():
     return response
 
 
-@app.get("/model")
+@app.get("/model", tags=["Health"])
 async def get_current_model():
-    """Return current active model."""
+    """Retorna o modelo Claude ativo.
+
+    Mostra qual modelo está sendo usado na sessão atual.
+    """
     return {
         "model": app_state.current_model,
         "model_id": _get_model_id(app_state.current_model),
@@ -154,9 +260,12 @@ def _get_model_id(model_name: str) -> str:
     return MODEL_IDS.get(model_name, f"claude-{model_name}-latest")
 
 
-@app.get("/health")
+@app.get("/health", tags=["Health"])
 async def health_check():
-    """Detailed health check."""
+    """Health check detalhado.
+
+    Retorna status completo incluindo RAG stats, autenticação e ambiente.
+    """
     env = os.getenv("ENVIRONMENT", "development")
 
     rag_stats = None

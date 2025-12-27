@@ -3,9 +3,10 @@
 import time
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app_state import AGENTFS_DIR, get_current_session_id
+from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, limiter
 from claude_rag_sdk.core.sdk_hooks import AuditEventType, get_audit_database, get_hooks_manager
 from utils.debug_parser import parse_debug_file
 
@@ -13,7 +14,8 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
 
 
 @router.get("/tools")
-async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
+@limiter.limit(RATE_LIMITS.get("default", "60/minute"))
+async def get_audit_tools(request: Request, limit: int = 100, session_id: Optional[str] = None):
     """Get tool call history."""
     from agentfs_sdk import AgentFS, AgentFSOptions
 
@@ -76,7 +78,8 @@ async def get_audit_tools(limit: int = 100, session_id: Optional[str] = None):
 
 
 @router.get("/stats")
-async def get_audit_stats(session_id: Optional[str] = None):
+@limiter.limit(RATE_LIMITS.get("default", "60/minute"))
+async def get_audit_stats(request: Request, session_id: Optional[str] = None):
     """Get audit statistics."""
     from agentfs_sdk import AgentFS, AgentFSOptions
 
@@ -93,9 +96,19 @@ async def get_audit_stats(session_id: Optional[str] = None):
         session_afs = await AgentFS.open(AgentFSOptions(id=sid))
         stats = await session_afs.tools.get_stats()
 
+        # Contar erros buscando chamadas com status 'error'
+        errors = 0
+        try:
+            since_timestamp = int(time.time()) - 86400
+            recent = await session_afs.tools.get_recent(since=since_timestamp, limit=1000)
+            errors = sum(1 for call in recent if getattr(call, "status", "") == "error")
+        except Exception:
+            pass
+
         return {
             "session_id": sid,
             "total_calls": sum(s.total_calls for s in stats),
+            "errors": errors,
             "by_tool": {s.name: s.total_calls for s in stats},
             "avg_duration_ms": (sum(s.avg_duration_ms for s in stats) / len(stats) if stats else 0),
         }
@@ -104,6 +117,7 @@ async def get_audit_stats(session_id: Optional[str] = None):
         return {
             "session_id": sid,
             "total_calls": 0,
+            "errors": 0,
             "by_tool": {},
             "error": "Failed to get statistics",
         }
@@ -113,7 +127,8 @@ async def get_audit_stats(session_id: Optional[str] = None):
 
 
 @router.get("/debug/{session_id}")
-async def get_debug_log(session_id: str):
+@limiter.limit(RATE_LIMITS.get("default", "60/minute"))
+async def get_debug_log(request: Request, session_id: str):
     """Retorna logs de debug do CLI para uma sessão."""
     entries = parse_debug_file(session_id)
 

@@ -24,13 +24,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from claude_rag_sdk.core.auth import verify_api_key
+from claude_rag_sdk.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["MCP Ingest"])
-
-# RAG Knowledge base path
-RAG_DB_PATH = Path.cwd() / "data" / "rag_knowledge.db"
 
 
 # === Pydantic Models ===
@@ -104,11 +102,12 @@ async def _get_rag_engine():
     """Obtém engine de ingestão do RAG."""
     from claude_rag_sdk.ingest import IngestEngine
 
+    config = get_config()
     return IngestEngine(
-        db_path=str(RAG_DB_PATH),
-        embedding_model="BAAI/bge-small-en-v1.5",
-        chunk_size=1500,
-        chunk_overlap=150,
+        db_path=str(config.rag_db_path),
+        embedding_model=config.embedding_model_string,
+        chunk_size=config.chunk_size,
+        chunk_overlap=config.chunk_overlap,
     )
 
 

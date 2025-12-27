@@ -1,5 +1,4 @@
-# Claude RAG SDK (local package - installs all dependencies)
+# Claude RAG SDK - todas as dependências estão em pyproject.toml
+# Use: pip install -e .
+# Ou para desenvolvimento: pip install -e ".[dev]"
 -e .
-
-# Additional server dependencies (if not in pyproject.toml)
-slowapi>=0.1.9
