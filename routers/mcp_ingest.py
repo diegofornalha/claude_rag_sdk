@@ -362,31 +362,46 @@ async def _run_ingest_task(
         # Obtém engine de ingestão
         engine = await _get_rag_engine()
 
-        # CORREÇÃO: Deletar documentos do adapter ANTES de reingerir (evita duplicação)
-        if adapter_name == "angular-cli":
-            try:
-                from claude_rag_sdk import ClaudeRAG
+        # CORREÇÃO FINAL: Deletar documentos do adapter ANTES de reingerir
+        logger.info(f"[DEBUG] Adapter name: '{adapter_name}'")
 
-                # Abrir RAG para deletar documentos Angular antigos
-                rag_options = engine.options
-                async with ClaudeRAG.open(rag_options) as rag:
-                    all_docs = await rag.list_documents(limit=1000)
-                    angular_docs = [
-                        d
-                        for d in all_docs
-                        if "angular" in (d.get("source", "") or "").lower()
-                        or "angular-cli-mcp" in (d.get("source", "") or "").lower()
-                    ]
+        # Sempre deletar Angular docs (independente do nome do adapter)
+        # Pois a condição anterior pode estar falhando
+        try:
+            import sqlite3
+            from pathlib import Path
 
-                    deleted_count = 0
-                    for doc in angular_docs:
-                        doc_id = doc.get("id")
-                        if doc_id and await rag.ingest.delete_document(doc_id):
+            db_path = Path.cwd() / "data" / "rag_knowledge.db"
+            logger.info(f"[DEBUG] DB path: {db_path}, exists: {db_path.exists()}")
+
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+
+                # Buscar IDs de documentos Angular
+                cursor.execute(
+                    "SELECT id, source FROM documents WHERE LOWER(source) LIKE '%angular%' OR LOWER(source) LIKE '%angular-cli%'"
+                )
+                angular_rows = cursor.fetchall()
+                logger.info(f"[DEBUG] Found {len(angular_rows)} Angular documents to delete")
+
+                # Deletar cada documento
+                deleted_count = 0
+                for doc_id, source in angular_rows:
+                    try:
+                        success = await engine.delete_document(doc_id)
+                        if success:
                             deleted_count += 1
+                            logger.info(f"[DEBUG] Deleted doc {doc_id}: {source[:50]}")
+                    except Exception as del_err:
+                        logger.error(f"[DEBUG] Failed to delete {doc_id}: {del_err}")
 
-                    logger.info(f"Deleted {deleted_count} old Angular documents before reingest")
-            except Exception as e:
-                logger.warning(f"Error deleting old Angular docs: {e}")
+                conn.close()
+                logger.info(f"✓ Deleted {deleted_count} old Angular documents before reingest")
+            else:
+                logger.info("[DEBUG] DB file does not exist yet")
+        except Exception as e:
+            logger.error(f"✗ Error deleting old Angular docs: {e}", exc_info=True)
 
         # Ingere cada documento
         for doc in documents:
