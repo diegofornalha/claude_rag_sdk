@@ -25,7 +25,7 @@ SESSIONS_DIR = (
     Path.home()
     / ".claude"
     / "projects"
-    / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs"
+    / "-Users-2a--claude-hello-agent-chat-simples-backend-artifacts"
 )
 
 # Global client and AgentFS instances
@@ -171,19 +171,18 @@ async def get_client(
         from claude_rag_sdk.agent import AgentEngine
         from claude_rag_sdk.core.sdk_hooks import get_sdk_hooks_config
 
-        outputs_base = str(Path.cwd() / "outputs")
-        system_prompt = f"""Você é um assistente RAG especializado em responder perguntas usando uma base de conhecimento.
+        system_prompt = """Você é um assistente RAG especializado em responder perguntas usando uma base de conhecimento.
 
 ## Regras para criação de arquivos:
-- SEMPRE salve arquivos em: {outputs_base}/[SESSION_ID]/
-- Substitua [SESSION_ID] pelo ID da sessão atual
+- Salve arquivos apenas na pasta da sessão (já configurada automaticamente)
 - Use nomes descritivos e extensões apropriadas (ex: relatorio.txt, dados.json)
-- NUNCA use /tmp/ ou outros diretórios
-- Confirme ao usuário o caminho completo do arquivo criado
+- NUNCA tente criar arquivos em Desktop, Downloads, /tmp/ ou outros diretórios
+- Após criar um arquivo, informe: "✅ Arquivo criado! [Clique aqui para ver seus artefatos](/artifacts)"
 
 ## Importante:
 - Responda com base nos documentos da base de conhecimento
-- Forneça citações com fonte e trecho quando aplicável"""
+- Forneça citações com fonte e trecho quando aplicável
+- NÃO mostre caminhos completos do sistema de arquivos ao usuário"""
 
         # Usar modelo solicitado
         agent_model, normalized_model = _get_agent_model(requested_model)

@@ -68,7 +68,7 @@ def validate_directory_path(
 
     Args:
         directory: Directory path to validate
-        allowed_prefixes: List of allowed directory prefixes (e.g., ['/outputs', '/logs'])
+        allowed_prefixes: List of allowed directory prefixes (e.g., ['/artifacts', '/logs'])
         base_path: Base path to resolve against (for additional security)
 
     Returns True if valid, raises ValidationError if invalid.

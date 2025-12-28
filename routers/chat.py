@@ -15,6 +15,8 @@ from pydantic import BaseModel
 
 from app_state import SESSIONS_DIR, get_agentfs, get_client
 from claude_rag_sdk.core.auth import verify_api_key
+from claude_rag_sdk.core.guest_limits import GuestLimitAction, get_guest_limit_manager
+from claude_rag_sdk.core.sdk_hooks import set_current_session_id
 from claude_rag_sdk.core.logger import get_logger
 from claude_rag_sdk.core.prompt_guard import PromptGuard
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, get_limiter
@@ -136,7 +138,7 @@ def append_to_jsonl(
         "parentUuid": parent_uuid,
         "isSidechain": False,
         "userType": "external",
-        "cwd": str(Path.cwd() / "outputs"),
+        "cwd": str(Path.cwd() / "artifacts"),
         "sessionId": session_id,
         "version": "2.0.72",
         "type": "user",
@@ -150,7 +152,7 @@ def append_to_jsonl(
         "parentUuid": user_uuid,
         "isSidechain": False,
         "userType": "external",
-        "cwd": str(Path.cwd() / "outputs"),
+        "cwd": str(Path.cwd() / "artifacts"),
         "sessionId": session_id,
         "version": "2.0.72",
         "type": "assistant",
@@ -267,12 +269,12 @@ async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depen
         # Buscar contexto RAG
         rag_context = await search_rag_context(chat_request.message)
 
-        outputs_path = str(Path.cwd() / "outputs" / target_session_id)
+        artifacts_path = str(Path.cwd() / "artifacts" / target_session_id)
 
         # Construir mensagem com contexto RAG se disponível
         if rag_context:
             context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
-Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
+Ao criar arquivos, use EXATAMENTE este caminho: {artifacts_path}/
 
 <contexto_interno>
 {rag_context}
@@ -284,8 +286,8 @@ Pergunta do usuário: {chat_request.message}"""
             print(f"[RAG] Contexto encontrado: {len(rag_context)} chars")
         else:
             context_message = f"""[CONTEXTO DO SISTEMA - Session ID: {target_session_id}]
-Ao criar arquivos, use EXATAMENTE este caminho: {outputs_path}/
-Exemplo: {outputs_path}/meu_arquivo.txt
+Ao criar arquivos, use EXATAMENTE este caminho: {artifacts_path}/
+Exemplo: {artifacts_path}/meu_arquivo.txt
 
 Pergunta do usuário: {chat_request.message}"""
 
@@ -316,7 +318,7 @@ Pergunta do usuário: {chat_request.message}"""
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         await afs.fs.write_file(
-            f"/outputs/chat_{timestamp}.json",
+            f"/artifacts/chat_{timestamp}.json",
             json.dumps(
                 {
                     "timestamp": timestamp,
@@ -330,31 +332,31 @@ Pergunta do usuário: {chat_request.message}"""
 
         import shutil
 
-        outputs_root = Path.cwd() / "outputs"
-        session_outputs = outputs_root / target_session_id
-        session_outputs.mkdir(parents=True, exist_ok=True)
+        artifacts_root = Path.cwd() / "artifacts"
+        session_artifacts = artifacts_root / target_session_id
+        session_artifacts.mkdir(parents=True, exist_ok=True)
 
-        if outputs_root.exists():
-            for item in outputs_root.iterdir():
+        if artifacts_root.exists():
+            for item in artifacts_root.iterdir():
                 if item.is_file():
-                    target = session_outputs / item.name
+                    target = session_artifacts / item.name
                     shutil.move(str(item), str(target))
 
         for default_folder in ["default", "default_session"]:
-            default_path = outputs_root / default_folder
+            default_path = artifacts_root / default_folder
             if default_path.exists() and default_path.is_dir():
                 for item in default_path.iterdir():
                     if item.is_file():
-                        target = session_outputs / item.name
+                        target = session_artifacts / item.name
                         if not target.exists():
                             shutil.move(str(item), str(target))
 
-        tmp_outputs = Path("/tmp/outputs")
-        if tmp_outputs.exists():
-            for item in tmp_outputs.iterdir():
+        tmp_artifacts = Path("/tmp/artifacts")
+        if tmp_artifacts.exists():
+            for item in tmp_artifacts.iterdir():
                 # Validate filename to prevent path traversal attacks
                 if item.is_file() and ".." not in item.name and "/" not in item.name:
-                    target = session_outputs / item.name
+                    target = session_artifacts / item.name
                     shutil.move(str(item), str(target))
 
         # Quando session_id específico é fornecido, escrever no JSONL dessa sessão
@@ -468,6 +470,31 @@ async def chat_stream(
         # Abrir AgentFS para salvar histórico (não usar ClaudeRAG para evitar JSONL duplicado)
         afs = await AgentFS.open(AgentFSOptions(id=target_session_id))
 
+        # =================================================================
+        # VERIFICAR LIMITE DE GUEST (antes de processar o prompt)
+        # =================================================================
+        guest_manager = get_guest_limit_manager()
+        guest_check = await guest_manager.check_limit(afs)
+
+        if not guest_check.can_continue:
+            # Usuário atingiu limite - retornar erro com detalhes para signup
+            await afs.close()
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "SIGNUP_REQUIRED",
+                    "message": guest_check.message,
+                    "prompt_count": guest_check.prompt_count,
+                    "action": guest_check.action.value,
+                },
+            )
+
+        # =================================================================
+        # CONFIGURAR SESSION_ID PARA VALIDAÇÃO DE PATH NOS HOOKS
+        # =================================================================
+        # Isso garante que tools Write/Edit só podem escrever em artifacts/{session_id}/
+        set_current_session_id(target_session_id)
+
         # SEMPRE salvar projeto do header (Angular envia "chat-angular")
         # Isso garante que mesmo sessões criadas via /reset sejam marcadas corretamente
         try:
@@ -547,11 +574,11 @@ async def chat_stream(
                 rag_context = await search_rag_context(chat_request.message)
 
                 # Construir mensagem com contexto RAG (se disponível)
-                outputs_path = str(Path.cwd() / "outputs" / target_session_id)
+                artifacts_path = str(Path.cwd() / "artifacts" / target_session_id)
 
                 if rag_context and not rag_context.startswith("[AVISO"):
                     # Incluir contexto RAG como instrução interna
-                    query_message = f"""Ao criar arquivos, use: {outputs_path}/
+                    query_message = f"""Ao criar arquivos, use: {artifacts_path}/
 
 <base_conhecimento>
 {rag_context}
@@ -634,6 +661,15 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                 # Marcar tool call como sucesso (para auditoria)
                 if call_id:
                     await afs.tools.success(call_id, {"response_length": len(full_response)})
+
+                # Incrementar contador de prompts (para guest limits)
+                try:
+                    guest_result = await guest_manager.check_and_increment(afs)
+                    if guest_result.action == GuestLimitAction.SOFT_LIMIT:
+                        # Enviar aviso ao frontend sobre limite próximo
+                        yield f"data: {json.dumps({'guest_warning': guest_result.message, 'prompts_remaining': guest_result.prompts_remaining})}\n\n"
+                except Exception as guest_err:
+                    print(f"[WARN] Erro ao incrementar contador guest: {guest_err}")
 
                 # Limpar sessão temporária se o client criou uma diferente da solicitada
                 if (

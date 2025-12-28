@@ -1,4 +1,4 @@
-"""Outputs endpoints."""
+"""Artifacts endpoints."""
 
 from pathlib import Path
 
@@ -9,30 +9,30 @@ from app_state import get_agentfs
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, limiter
 from utils.validators import validate_directory_path, validate_filename, validate_session_id
 
-router = APIRouter(prefix="/outputs", tags=["Outputs"])
+router = APIRouter(prefix="/artifacts", tags=["Artifacts"])
 
 
 @router.get("")
 @limiter.limit(RATE_LIMITS.get("default", "60/minute"))
-async def list_outputs(request: Request, directory: str = "outputs", session_id: str = None):
-    """List output files from physical filesystem.
+async def list_artifacts(request: Request, directory: str = "artifacts", session_id: str = None):
+    """List artifact files from physical filesystem.
 
-    When session_id is provided, lists files from outputs/{session_id}/.
+    When session_id is provided, lists files from artifacts/{session_id}/.
     When session_id is not provided, lists ALL files from ALL sessions recursively.
     """
     try:
         # Validate inputs
-        validate_directory_path(directory, allowed_prefixes=["outputs", "/outputs"])
+        validate_directory_path(directory, allowed_prefixes=["artifacts", "/artifacts"])
         if session_id:
             validate_session_id(session_id)
-            outputs_dir = Path.cwd() / directory / session_id
+            artifacts_dir = Path.cwd() / directory / session_id
         else:
-            outputs_dir = Path.cwd() / directory
+            artifacts_dir = Path.cwd() / directory
 
-        if not outputs_dir.exists():
+        if not artifacts_dir.exists():
             return {
                 "files": [],
-                "directory": str(outputs_dir),
+                "directory": str(artifacts_dir),
                 "count": 0,
                 "session_id": session_id,
             }
@@ -41,7 +41,7 @@ async def list_outputs(request: Request, directory: str = "outputs", session_id:
 
         if session_id:
             # List files from specific session directory
-            for file in outputs_dir.iterdir():
+            for file in artifacts_dir.iterdir():
                 if file.is_file():
                     stat = file.stat()
                     files.append(
@@ -55,7 +55,7 @@ async def list_outputs(request: Request, directory: str = "outputs", session_id:
                     )
         else:
             # List ALL files from ALL session subdirectories recursively
-            for session_dir in outputs_dir.iterdir():
+            for session_dir in artifacts_dir.iterdir():
                 if session_dir.is_dir():
                     sid = session_dir.name
                     for file in session_dir.iterdir():
@@ -71,7 +71,7 @@ async def list_outputs(request: Request, directory: str = "outputs", session_id:
                                 }
                             )
                 elif session_dir.is_file():
-                    # Also include files in root outputs/ directory
+                    # Also include files in root artifacts/ directory
                     stat = session_dir.stat()
                     files.append(
                         {
@@ -86,30 +86,30 @@ async def list_outputs(request: Request, directory: str = "outputs", session_id:
         files.sort(key=lambda f: f["modified"], reverse=True)
         return {
             "files": files,
-            "directory": str(outputs_dir),
+            "directory": str(artifacts_dir),
             "count": len(files),
             "session_id": session_id,
         }
     except Exception as e:
-        print(f"[ERROR] Failed to list outputs: {e}")
+        print(f"[ERROR] Failed to list artifacts: {e}")
         return {
             "files": [],
-            "error": "Failed to list outputs",
+            "error": "Failed to list artifacts",
             "session_id": session_id,
         }
 
 
 @router.get("/file/{filename:path}")
 @limiter.limit(RATE_LIMITS.get("default", "60/minute"))
-async def get_output_file(request: Request, filename: str):
-    """Get output file content from AgentFS filesystem."""
+async def get_artifact_file(request: Request, filename: str):
+    """Get artifact file content from AgentFS filesystem."""
     # Validate filename to prevent path traversal
     validate_filename(filename)
 
     afs = await get_agentfs()
 
     try:
-        filepath = f"/outputs/{filename}" if not filename.startswith("/") else filename
+        filepath = f"/artifacts/{filename}" if not filename.startswith("/") else filename
         content = await afs.fs.read_file(filepath)
         return {
             "filename": filename,
@@ -123,13 +123,13 @@ async def get_output_file(request: Request, filename: str):
 
 @router.post("/write")
 @limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
-async def write_output_file(
-    request: Request, filename: str, content: str, directory: str = "/outputs"
+async def write_artifact_file(
+    request: Request, filename: str, content: str, directory: str = "/artifacts"
 ):
     """Write file to AgentFS filesystem."""
     # Validate inputs to prevent path traversal
     validate_filename(filename)
-    validate_directory_path(directory, allowed_prefixes=["/outputs", "/logs"])
+    validate_directory_path(directory, allowed_prefixes=["/artifacts", "/logs"])
 
     afs = await get_agentfs()
 
@@ -148,18 +148,18 @@ async def write_output_file(
 
 @router.delete("/{filename:path}")
 @limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
-async def delete_output(request: Request, filename: str):
-    """Delete file from physical filesystem (outputs/ directory)."""
+async def delete_artifact(request: Request, filename: str):
+    """Delete file from physical filesystem (artifacts/ directory)."""
     # Validate filename to prevent path traversal
     validate_filename(filename)
 
     try:
-        # Deletar do filesystem físico (outputs/{session_id}/{filename})
-        outputs_dir = Path.cwd() / "outputs"
-        filepath = outputs_dir / filename
+        # Deletar do filesystem físico (artifacts/{session_id}/{filename})
+        artifacts_dir = Path.cwd() / "artifacts"
+        filepath = artifacts_dir / filename
 
-        # Verificar se o caminho está dentro de outputs/ (segurança)
-        if not filepath.resolve().is_relative_to(outputs_dir.resolve()):
+        # Verificar se o caminho está dentro de artifacts/ (segurança)
+        if not filepath.resolve().is_relative_to(artifacts_dir.resolve()):
             print(f"[SECURITY] Tentativa de path traversal: {filename}")
             return {"success": False, "error": "Invalid path"}
 
@@ -173,7 +173,7 @@ async def delete_output(request: Request, filename: str):
 
             # Verificar se pasta ficou vazia e deletar se for o caso
             deleted_dir = None
-            if parent_dir.exists() and parent_dir != outputs_dir:
+            if parent_dir.exists() and parent_dir != artifacts_dir:
                 remaining_files = list(parent_dir.iterdir())
                 if len(remaining_files) == 0:
                     parent_dir.rmdir()

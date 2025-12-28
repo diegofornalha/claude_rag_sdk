@@ -14,6 +14,7 @@ from app_state import (
     reset_session,
 )
 from claude_rag_sdk.core.auth import verify_api_key
+from claude_rag_sdk.core.guest_limits import get_guest_limit_manager
 from claude_rag_sdk.core.rate_limiter import get_limiter
 from utils.validators import validate_session_id
 
@@ -30,9 +31,9 @@ async def get_current_session():
         return {"active": False, "session_id": None, "message": "No active session"}
 
     session_db = AGENTFS_DIR / f"{session_id}.db"
-    session_outputs = Path.cwd() / "outputs" / session_id
+    session_artifacts = Path.cwd() / "artifacts" / session_id
 
-    if not session_db.exists() and not session_outputs.exists():
+    if not session_db.exists() and not session_artifacts.exists():
         return {"active": False, "session_id": None, "message": "No active session"}
 
     session_info = None
@@ -40,7 +41,7 @@ async def get_current_session():
     if app_state.agentfs:
         try:
             session_info = await app_state.agentfs.kv.get("session:info")
-            output_files = await app_state.agentfs.fs.readdir("/outputs")
+            output_files = await app_state.agentfs.fs.readdir("/artifacts")
         except (OSError, IOError, KeyError):
             pass  # Session info is optional, continue without it
 
@@ -81,9 +82,28 @@ async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key
 
 
 @router.get("/sessions")
-async def list_sessions():
-    """List all sessions (AgentFS + old JSONL sessions)."""
+async def list_sessions(request: Request, user_id: str = None):
+    """List sessions filtered by user_id.
+
+    Query params:
+        user_id: Se fornecido, retorna apenas sessões desse usuário.
+                 Se não fornecido em dev mode, retorna todas (para testes).
+                 Em produção sem user_id, retorna lista vazia.
+
+    Comportamento:
+        - Em development: retorna todas se user_id não fornecido
+        - Em production: exige user_id, retorna vazio se não fornecido
+    """
+    import os
+
     from agentfs_sdk import AgentFS, AgentFSOptions
+
+    environment = os.getenv("ENVIRONMENT", "development")
+    is_dev = environment.lower() in ("development", "dev", "local")
+
+    # Em produção, se não tem user_id, retornar vazio (segurança)
+    if not is_dev and not user_id:
+        return {"count": 0, "sessions": [], "message": "user_id required in production"}
 
     sessions = []
     seen_session_ids = set()  # Para evitar duplicatas
@@ -128,6 +148,7 @@ async def list_sessions():
             title = None  # Título customizado
             favorite = False  # Favorito
             assigned_project_id = None  # Projeto atribuído
+            session_user_id = None  # User ID da sessão
             try:
                 session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
 
@@ -163,16 +184,33 @@ async def list_sessions():
                 except Exception:
                     pass
 
+                # Ler user_id da sessão
+                try:
+                    stored_user_id = await session_agentfs.kv.get("session:user_id")
+                    if stored_user_id:
+                        session_user_id = stored_user_id
+                except Exception:
+                    pass
+
+                # Filtrar por user_id se fornecido
+                if user_id:
+                    # Se tem user_id no filtro, só mostrar sessões desse usuário
+                    # ou sessões guest (sem user_id) se for o mesmo user_id tentando ver suas sessões guest
+                    if session_user_id and session_user_id != user_id:
+                        # Sessão pertence a outro usuário - pular
+                        await session_agentfs.close()
+                        continue
+
                 if message_count == 0:
                     history = await session_agentfs.kv.get("conversation:history")
                     if history:
                         message_count = len(history)
 
                 try:
-                    outputs = await session_agentfs.fs.readdir("/outputs")
-                    output_count = len(outputs) if outputs else 0
+                    artifacts = await session_agentfs.fs.readdir("/artifacts")
+                    output_count = len(artifacts) if artifacts else 0
                 except (OSError, IOError, FileNotFoundError):
-                    output_count = 0  # No outputs directory or read failed
+                    output_count = 0  # No artifacts directory or read failed
             except Exception as e:
                 print(f"[WARN] Could not read session {session_id}: {e}")
             finally:
@@ -189,6 +227,8 @@ async def list_sessions():
                         "title": title,  # Título customizado (pode ser None)
                         "favorite": favorite,  # Favorito
                         "project_id": assigned_project_id,  # Projeto atribuído
+                        "user_id": session_user_id,  # User ID (None = guest)
+                        "is_guest": session_user_id is None,  # Flag para identificar sessões guest
                         "file": f"{project}/{session_id}",
                         "file_name": session_id,
                         "db_file": str(db_file),
@@ -312,7 +352,7 @@ async def delete_session(session_id: str):
         Path.home()
         / ".claude"
         / "projects"
-        / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+        / "-Users-2a--claude-hello-agent-chat-simples-backend-artifacts",
     ]
     for old_dir in old_sessions_dirs:
         jsonl_file = old_dir / f"{session_id}.jsonl"
@@ -320,10 +360,10 @@ async def delete_session(session_id: str):
             jsonl_file.unlink()
             deleted.append(str(jsonl_file))
 
-    outputs_dir = Path.cwd() / "outputs" / session_id
-    if outputs_dir.exists() and outputs_dir.is_dir():
-        shutil.rmtree(outputs_dir)
-        deleted.append(str(outputs_dir))
+    artifacts_dir = Path.cwd() / "artifacts" / session_id
+    if artifacts_dir.exists() and artifacts_dir.is_dir():
+        shutil.rmtree(artifacts_dir)
+        deleted.append(str(artifacts_dir))
 
     return {
         "success": True,
@@ -400,6 +440,70 @@ async def update_session(session_id: str, request: Request):
             await session_agentfs.close()
 
 
+@router.post("/sessions/{session_id}/claim")
+async def claim_session(session_id: str, request: Request):
+    """Vincula um user_id à sessão após signup/login.
+
+    Fluxo:
+    1. Usuário guest faz 1 prompt
+    2. No 2º prompt, recebe SIGNUP_REQUIRED
+    3. Frontend mostra signup/login
+    4. Após autenticação, frontend chama este endpoint
+    5. Sessão é "promovida" de guest para user
+
+    Body:
+    {
+        "user_id": "uuid-do-usuario"
+    }
+    """
+    from agentfs_sdk import AgentFS, AgentFSOptions
+
+    validate_session_id(session_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    user_id = body.get("user_id")
+    if not user_id or not isinstance(user_id, str):
+        raise HTTPException(status_code=400, detail="user_id is required and must be a string")
+
+    # Validar formato do user_id (prevenir injection)
+    import re
+
+    if not re.match(r"^[a-zA-Z0-9\-_]+$", user_id):
+        raise HTTPException(status_code=400, detail="Invalid user_id format")
+
+    session_agentfs = None
+    try:
+        session_agentfs = await AgentFS.open(AgentFSOptions(id=session_id))
+
+        # Verificar se sessão já tem user_id (não permitir sobrescrever)
+        existing_user_id = await session_agentfs.kv.get("session:user_id")
+        if existing_user_id and existing_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Session already belongs to another user")
+
+        # Vincular user_id
+        guest_manager = get_guest_limit_manager()
+        await guest_manager.set_user_id(session_agentfs, user_id)
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "user_id": user_id,
+            "message": "Sessão vinculada ao usuário com sucesso",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to claim session: {e}")
+    finally:
+        if session_agentfs:
+            await session_agentfs.close()
+
+
 @router.get("/sessions/{session_id}")
 async def get_session_details(session_id: str):
     """Get session details with messages."""
@@ -436,7 +540,7 @@ async def get_session_messages(session_id: str):
         Path.home()
         / ".claude"
         / "projects"
-        / "-Users-2a--claude-hello-agent-chat-simples-backend-outputs",
+        / "-Users-2a--claude-hello-agent-chat-simples-backend-artifacts",
     ]
 
     jsonl_file = None

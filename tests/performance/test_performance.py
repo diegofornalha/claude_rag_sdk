@@ -203,11 +203,11 @@ class TestSessionEndpointPerformance:
 
 
 class TestOutputsEndpointPerformance:
-    """Testes de performance para endpoints de outputs."""
+    """Testes de performance para endpoints de artifacts."""
 
-    def test_outputs_list_latency(self, client):
-        """Mede latência do GET /outputs."""
-        result = measure_endpoint(client, "get", "/outputs", num_requests=50)
+    def test_artifacts_list_latency(self, client):
+        """Mede latência do GET /artifacts."""
+        result = measure_endpoint(client, "get", "/artifacts", num_requests=50)
 
         print_result(result)
 

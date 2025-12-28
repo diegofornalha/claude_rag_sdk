@@ -94,9 +94,9 @@ class TestCompleteUserFlow:
 
         assert response.status_code == 200
 
-    def test_flow_check_outputs(self, client):
-        """Passo 7: Verificar outputs da sessão."""
-        response = client.get("/outputs")
+    def test_flow_check_artifacts(self, client):
+        """Passo 7: Verificar artifacts da sessão."""
+        response = client.get("/artifacts")
 
         assert response.status_code == 200
         data = response.json()
@@ -141,16 +141,16 @@ class TestSessionLifecycle:
 
 
 class TestOutputsFlow:
-    """Testes de fluxo de outputs."""
+    """Testes de fluxo de artifacts."""
 
-    def test_outputs_empty_initially(self, client):
-        """Verifica outputs vazios inicialmente."""
+    def test_artifacts_empty_initially(self, client):
+        """Verifica artifacts vazios inicialmente."""
         # Criar nova sessão
         create_response = client.post("/sessions")
         session_id = create_response.json()["session_id"]
 
-        # Verificar outputs vazios
-        response = client.get(f"/outputs?session_id={session_id}")
+        # Verificar artifacts vazios
+        response = client.get(f"/artifacts?session_id={session_id}")
 
         if response.status_code == 200:
             data = response.json()
@@ -159,7 +159,7 @@ class TestOutputsFlow:
 
     def test_list_output_files(self, client):
         """Lista arquivos de output."""
-        response = client.get("/outputs")
+        response = client.get("/artifacts")
 
         assert response.status_code == 200
         data = response.json()
@@ -300,7 +300,7 @@ class TestSecurityFlow:
         ]
 
         for mid in malicious_ids:
-            response = client.get(f"/outputs?session_id={mid}")
+            response = client.get(f"/artifacts?session_id={mid}")
             # Não deve retornar arquivos do sistema
             if response.status_code == 200:
                 data = response.json()

@@ -25,12 +25,12 @@ from claude_rag_sdk.core.rate_limiter import SLOWAPI_AVAILABLE
 
 logger = get_logger("server")
 from routers import (
+    artifacts_router,
     audit_router,
     chat_router,
     fs_router,
     is_mcp_available,
     mcp_router,
-    outputs_router,
     rag_router,
     sessions_router,
 )
@@ -72,7 +72,7 @@ API REST para chat com **RAG (Retrieval-Augmented Generation)** usando Claude.
 - 🔍 **RAG Search**: Busca semântica em documentos
 - 📁 **Sessions**: Gerenciamento de sessões de chat
 - 📊 **Audit**: Logs de tool calls e debug
-- 📄 **Outputs**: Arquivos gerados pelo Claude
+- 📄 **Artifacts**: Artefatos gerados pelo Claude
 
 ### Autenticação
 
@@ -98,7 +98,7 @@ data: [DONE]
         {"name": "Chat", "description": "Endpoints de conversação com Claude"},
         {"name": "RAG", "description": "Busca semântica e ingestão de documentos"},
         {"name": "Sessions", "description": "Gerenciamento de sessões de chat"},
-        {"name": "Outputs", "description": "Arquivos gerados pelo Claude"},
+        {"name": "Artifacts", "description": "Artefatos gerados pelo Claude"},
         {"name": "Audit", "description": "Logs de tool calls e debug"},
         {"name": "MCP", "description": "Model Context Protocol adapters"},
         {"name": "Health", "description": "Endpoints de status e health check"},
@@ -196,7 +196,7 @@ if SLOWAPI_AVAILABLE:
 app.include_router(chat_router)
 app.include_router(rag_router)
 app.include_router(sessions_router)
-app.include_router(outputs_router)
+app.include_router(artifacts_router)
 app.include_router(audit_router)
 app.include_router(fs_router)
 # app.include_router(neo4j_mcp_router)  # Não necessário - SDK funciona!

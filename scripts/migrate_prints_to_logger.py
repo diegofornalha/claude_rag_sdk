@@ -54,12 +54,14 @@ def analyze_file(filepath: Path) -> list[dict]:
 
     for i, line in enumerate(lines, 1):
         if "print(" in line:
-            findings.append({
-                "file": str(filepath),
-                "line": i,
-                "content": line.strip(),
-                "type": _classify_print(line),
-            })
+            findings.append(
+                {
+                    "file": str(filepath),
+                    "line": i,
+                    "content": line.strip(),
+                    "type": _classify_print(line),
+                }
+            )
 
     return findings
 
@@ -145,7 +147,7 @@ def main():
     print(report)
 
     # Salvar relatório
-    report_path = root / "outputs" / "migration_report.txt"
+    report_path = root / "artifacts" / "migration_report.txt"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with open(report_path, "w") as f:
         f.write(report)

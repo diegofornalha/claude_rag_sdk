@@ -98,11 +98,11 @@ class TestSessionEndpoints:
 
 
 class TestOutputsEndpoints:
-    """Testes dos endpoints de outputs."""
+    """Testes dos endpoints de artifacts."""
 
-    def test_outputs_list(self, client):
-        """GET /outputs - Deve listar arquivos de output."""
-        response = client.get("/outputs")
+    def test_artifacts_list(self, client):
+        """GET /artifacts - Deve listar arquivos de output."""
+        response = client.get("/artifacts")
 
         assert response.status_code == 200
         data = response.json()
