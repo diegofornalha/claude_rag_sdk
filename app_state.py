@@ -224,7 +224,24 @@ async def get_client(
         engine = AgentEngine(options=temp_options, mcp_server_path=None)
         client_options = engine._get_agent_options()
 
-        # ADICIONAR MCP PROGRAMATICAMENTE (solução correta)
+        # ====== RAG SDK MCP SERVER (in-process) ======
+        from claude_rag_sdk.rag_mcp.sdk_server import create_rag_sdk_server, RAG_ALLOWED_TOOLS
+
+        rag_sdk_server = create_rag_sdk_server()
+
+        # Inicializar mcp_servers com servidor RAG
+        if mcp_servers_dict is None:
+            mcp_servers_dict = {}
+
+        # Adicionar RAG tools como SDK MCP server (in-process)
+        mcp_servers_dict["rag-tools"] = rag_sdk_server
+
+        # Adicionar RAG tools ao allowed_tools
+        allowed_tools_list.extend(RAG_ALLOWED_TOOLS)
+        print(f"[RAG SDK] Servidor MCP carregado com {len(RAG_ALLOWED_TOOLS)} tools")
+        # ====== FIM RAG SDK MCP SERVER ======
+
+        # ADICIONAR MCP PROGRAMATICAMENTE (Neo4j e outros externos)
         if mcp_servers_dict:
             client_options.mcp_servers = mcp_servers_dict
             client_options.allowed_tools = allowed_tools_list

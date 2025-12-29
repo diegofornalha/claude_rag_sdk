@@ -219,6 +219,18 @@ class ChatRequest(BaseModel):
     fork_session: bool | None = False  # Fork instead of continue
 
 
+class ChatStreamRequest(BaseModel):
+    """Request model for streaming chat endpoint."""
+
+    message: str
+    session_id: str | None = None
+    model: str | None = "opus"  # haiku, sonnet, opus
+    resume: bool | None = True  # Resume previous conversation context
+    fork_session: str | None = None  # Fork from this session
+    use_rag: bool = True  # Enable RAG context
+    top_k: int = 5  # Number of RAG results
+
+
 class ChatResponse(BaseModel):
     response: str
 
@@ -632,18 +644,19 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                     await afs.kv.set("conversation:history", history[-100:])
                     print(f"[STREAM] Histórico salvo: {len(history)} mensagens")
 
-                    # Auto-rename: definir título se não existir
-                    # Sempre verifica, não apenas na primeira mensagem
+                    # Auto-rename: gerar título inteligente se não existir
                     try:
                         existing_title = await afs.kv.get("session:title")
                         if not existing_title:
-                            # Extrair primeiras 3 palavras da mensagem do usuário
-                            words = chat_request.message.strip().split()[:3]
-                            auto_title = " ".join(words)
-                            if len(auto_title) > 50:
-                                auto_title = auto_title[:50]
+                            from agents.title_generator import get_smart_title
+
+                            # Gerar título inteligente com Claude
+                            auto_title = await get_smart_title(
+                                user_message=chat_request.message,
+                                assistant_response=full_response,
+                            )
                             await afs.kv.set("session:title", auto_title)
-                            print(f"[STREAM] Auto-título definido: {auto_title}")
+                            print(f"[STREAM] Auto-título inteligente: {auto_title}")
                     except Exception as title_err:
                         print(f"[WARN] Erro ao definir auto-título: {title_err}")
                 except Exception as save_err:
@@ -721,3 +734,68 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
         if afs:
             await afs.close()
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# =============================================================================
+# V2 Endpoints - Using ChatAgent Abstraction
+# =============================================================================
+
+
+@router.post("/v2/chat/stream")
+async def chat_stream_v2(
+    chat_request: ChatStreamRequest,
+    request: Request,
+    _: None = Depends(verify_api_key),
+):
+    """Chat streaming endpoint V2 - Usa ChatAgent abstraction.
+
+    Esta versão usa a abstração ChatAgent que encapsula:
+    - Gerenciamento de sessões
+    - Comandos de sessão (favoritar, renomear)
+    - Integração com RAG
+    - Streaming SSE
+    - Auditoria
+    - Persistência JSONL
+
+    Exemplo de uso:
+        POST /v2/chat/stream
+        {
+            "message": "olá",
+            "session_id": "uuid-opcional",
+            "model": "opus"
+        }
+    """
+    from agents.chat_agent import ChatRequest as AgentChatRequest
+    from agents.chat_agent import create_chat_agent
+
+    # Rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        await RATE_LIMITS["chat"].check(client_ip)
+    except Exception as rate_err:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded: {rate_err}",
+        )
+
+    # Obter projeto do header
+    project = request.headers.get("X-Client-Project", "default")
+
+    # Criar request para o agent
+    agent_request = AgentChatRequest(
+        message=chat_request.message,
+        session_id=chat_request.session_id,
+        model=chat_request.model or "opus",
+        resume=chat_request.resume if chat_request.resume is not None else True,
+        fork_session=chat_request.fork_session,
+        project=project,
+    )
+
+    # Criar agent com função de busca RAG
+    agent = create_chat_agent(rag_search_fn=search_rag_context)
+
+    async def generate():
+        async for chunk in agent.stream(agent_request):
+            yield chunk.to_sse()
+
+    return StreamingResponse(generate(), media_type="text/event-stream")

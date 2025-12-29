@@ -359,3 +359,98 @@ async def get_rate_limit_usage(user_id: str = "default"):
         "max_calls_per_hour": hooks_manager.max_calls_per_hour,
         "rate_limit_enabled": hooks_manager.enable_rate_limit,
     }
+
+
+# =============================================================================
+# Token/Cost Metrics Endpoints
+# =============================================================================
+
+
+@router.get("/metrics/global")
+async def get_global_metrics():
+    """
+    Get global metrics across all sessions.
+
+    Returns:
+        - total_sessions: Number of sessions tracked
+        - total_requests: Total number of requests
+        - total_tokens: Combined input + output tokens
+        - total_cost_usd: Estimated total cost
+        - success_rate: Percentage of successful requests
+    """
+    from agents.metrics import get_metrics_manager
+
+    manager = get_metrics_manager()
+    return manager.get_global_stats()
+
+
+@router.get("/metrics/session/{session_id}")
+async def get_session_metrics(session_id: str):
+    """
+    Get metrics for a specific session.
+
+    Returns:
+        - input_tokens, output_tokens, total_tokens
+        - total_cost_usd
+        - avg_latency_ms
+        - tool_calls count
+        - success_rate
+    """
+    from agents.metrics import get_metrics_manager
+
+    manager = get_metrics_manager()
+    metrics = manager.get_session_metrics(session_id)
+
+    if not metrics:
+        # Tentar carregar do AgentFS
+        from agentfs_sdk import AgentFS, AgentFSOptions
+
+        try:
+            afs = await AgentFS.open(AgentFSOptions(id=session_id))
+            metrics = await manager.load_from_agentfs(afs, session_id)
+            await afs.close()
+        except Exception:
+            pass
+
+    if not metrics:
+        raise HTTPException(status_code=404, detail="Session metrics not found")
+
+    return metrics.to_dict()
+
+
+@router.get("/metrics/recent")
+async def get_recent_requests(limit: int = 50):
+    """
+    Get metrics from recent requests.
+
+    Args:
+        limit: Maximum number of requests to return (default 50, max 100)
+
+    Returns:
+        List of request metrics with tokens, cost, latency
+    """
+    from agents.metrics import get_metrics_manager
+
+    manager = get_metrics_manager()
+    requests = manager.get_recent_requests(min(limit, 100))
+
+    return {
+        "count": len(requests),
+        "requests": [r.to_dict() for r in requests],
+    }
+
+
+@router.get("/metrics/pricing")
+async def get_pricing_info():
+    """
+    Get current pricing information for models.
+
+    Returns pricing in USD per 1M tokens.
+    """
+    from agents.metrics import PRICING
+
+    return {
+        "currency": "USD",
+        "unit": "per 1M tokens",
+        "models": PRICING,
+    }

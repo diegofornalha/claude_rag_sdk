@@ -104,7 +104,7 @@ async def check_prerequisites() -> bool:
 
     # Verifica se o módulo MCP está disponível
     try:
-        from claude_rag_sdk.mcp import get_mcp_config  # noqa: F401
+        from claude_rag_sdk.mcp_client import get_mcp_config  # noqa: F401
 
         print_status("MCP Module", "disponível", True)
     except ImportError as e:
@@ -132,7 +132,7 @@ async def show_status() -> None:
     print_header("Status do Sistema MCP")
 
     try:
-        from claude_rag_sdk.mcp import get_mcp_registry
+        from claude_rag_sdk.mcp_client import get_mcp_registry
 
         registry = get_mcp_registry()
 
@@ -152,7 +152,7 @@ async def show_status() -> None:
 
 async def enable_angular_adapter() -> None:
     """Habilita o adapter Angular CLI."""
-    from claude_rag_sdk.mcp import get_mcp_config
+    from claude_rag_sdk.mcp_client import get_mcp_config
 
     config = get_mcp_config()
     config.enable_adapter("angular-cli")
@@ -169,7 +169,7 @@ async def run_ingest(
 ) -> None:
     """Executa a ingestão de documentos."""
     from claude_rag_sdk.ingest import IngestEngine
-    from claude_rag_sdk.mcp import get_adapter
+    from claude_rag_sdk.mcp_client import get_adapter
 
     print_header("Iniciando Ingestão")
 

@@ -1,0 +1,86 @@
+============================================================
+RELATÓRIO DE AVALIAÇÃO DO RAG
+Gerado em: 2025-12-29T04:12:43.732294
+============================================================
+
+RESUMO
+----------------------------------------
+Total de perguntas: 10
+Sucesso: 10 (100.0%)
+Falhas: 0
+
+CITAÇÕES
+----------------------------------------
+Perguntas com citações: 10 (100.0%)
+Total de citações: 31
+Média por pergunta: 3.10
+
+PRECISÃO
+----------------------------------------
+Match de fontes: 8/10 (80.0%)
+Match de keywords: 7/10 (70.0%)
+
+CONFIANÇA
+----------------------------------------
+Média: 0.74
+Mínima: 0.60
+Máxima: 1.00
+
+PERFORMANCE
+----------------------------------------
+Latência média: 15054ms
+Latência mínima: 11152ms
+Latência máxima: 22184ms
+Latência total: 150.5s
+
+TOKENS
+----------------------------------------
+Input total: 14,526
+Output total: 4,597
+Input médio: 1453
+Output médio: 460
+
+============================================================
+RESULTADOS DETALHADOS
+============================================================
+
+✅ Pergunta 1: Quais sao os princi­pios obrigatorios da Poli­tica de Uso de...
+   Confiança: 0.90 | Citações: 3 | Latência: 12330ms
+   Source match: Sim | Keyword match: Sim
+
+✅ Pergunta 2: Na arquitetura RAG enterprise, quais componentes são conside...
+   Confiança: 0.60 | Citações: 1 | Latência: 14084ms
+   Source match: Sim | Keyword match: Não
+
+✅ Pergunta 3: Qual  a poli­tica de retenção de logs indicada nos materiais...
+   Confiança: 0.60 | Citações: 3 | Latência: 11747ms
+   Source match: Sim | Keyword match: Sim
+
+✅ Pergunta 4: Cite 3 metricas mi­nimas para operar um assistente de IA em ...
+   Confiança: 0.60 | Citações: 3 | Latência: 14462ms
+   Source match: Não | Keyword match: Sim
+
+✅ Pergunta 5: Explique 'evidencia primeiro e quando voce aplicaria....
+   Confiança: 0.60 | Citações: 3 | Latência: 11152ms
+   Source match: Sim | Keyword match: Não
+
+✅ Pergunta 6: Quais metadados mi­nimos voce indexaria para suportar govern...
+   Confiança: 1.00 | Citações: 4 | Latência: 16321ms
+   Source match: Sim | Keyword match: Não
+
+✅ Pergunta 7: Quais controles vocÃª aplicaria para mitigar prompt injectio...
+   Confiança: 0.80 | Citações: 2 | Latência: 11452ms
+   Source match: Sim | Keyword match: Sim
+
+✅ Pergunta 8: Proponha um SLO inicial para o endpoint de perguntas e expli...
+   Confiança: 0.70 | Citações: 4 | Latência: 18921ms
+   Source match: Sim | Keyword match: Sim
+
+✅ Pergunta 9: Quais estratégias voce usaria para reduzir custo sem perder ...
+   Confiança: 0.90 | Citações: 3 | Latência: 17891ms
+   Source match: Não | Keyword match: Sim
+
+✅ Pergunta 10: Descreva um roadmap de implantação em fases para IA em uma g...
+   Confiança: 0.70 | Citações: 5 | Latência: 22184ms
+   Source match: Sim | Keyword match: Sim
+

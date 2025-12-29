@@ -28,6 +28,7 @@ from routers import (
     artifacts_router,
     audit_router,
     chat_router,
+    evaluate_router,
     fs_router,
     is_mcp_available,
     mcp_router,
@@ -204,6 +205,7 @@ app.include_router(sessions_router)
 app.include_router(artifacts_router)
 app.include_router(audit_router)
 app.include_router(fs_router)
+app.include_router(evaluate_router)
 # app.include_router(neo4j_mcp_router)  # Não necessário - SDK funciona!
 
 # MCP router é opcional - só inclui se disponível

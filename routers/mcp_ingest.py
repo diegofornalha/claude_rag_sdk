@@ -78,7 +78,7 @@ def _get_registry():
     try:
         # Garante que adapters foram registrados
         from claude_rag_sdk import mcp_adapters  # noqa: F401
-        from claude_rag_sdk.mcp import get_mcp_registry
+        from claude_rag_sdk.mcp_client import get_mcp_registry
 
         return get_mcp_registry()
     except ImportError as e:
@@ -89,7 +89,7 @@ def _get_registry():
 def _get_config():
     """Obtém configuração MCP."""
     try:
-        from claude_rag_sdk.mcp import get_mcp_config
+        from claude_rag_sdk.mcp_client import get_mcp_config
 
         return get_mcp_config()
     except ImportError:
@@ -335,7 +335,7 @@ async def _run_ingest_task(
     documents_ingested = 0
 
     try:
-        from claude_rag_sdk.mcp import get_adapter
+        from claude_rag_sdk.mcp_client import get_adapter
 
         # Obtém adapter (conecta se necessário)
         adapter = await get_adapter(adapter_name)

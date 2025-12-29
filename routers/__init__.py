@@ -3,6 +3,7 @@
 from .artifacts import router as artifacts_router
 from .audit import router as audit_router
 from .chat import router as chat_router
+from .evaluate import router as evaluate_router
 from .fs import router as fs_router
 from .rag import router as rag_router
 from .sessions import router as sessions_router
@@ -19,6 +20,7 @@ except ImportError:
 __all__ = [
     "audit_router",
     "chat_router",
+    "evaluate_router",
     "rag_router",
     "sessions_router",
     "artifacts_router",
