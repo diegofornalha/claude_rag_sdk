@@ -4,9 +4,10 @@
 # Testes unitários para busca híbrida BM25 + Vetorial
 # =============================================================================
 
-import pytest
 import math
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestBM25:
@@ -351,7 +352,7 @@ class TestBM25Scoring:
         # IDF manual: log((N - df + 0.5) / (df + 0.5) + 1)
         # N=4, df("python")=2
         # IDF = log((4 - 2 + 0.5) / (2 + 0.5) + 1) = log(2)
-        expected_idf = math.log((4 - 2 + 0.5) / (2 + 0.5) + 1)
+        math.log((4 - 2 + 0.5) / (2 + 0.5) + 1)
 
         # Buscar e verificar que docs com "python" têm score
         results = bm25.search("python")
@@ -527,7 +528,6 @@ class TestBM25Parameters:
 
 def run_hybrid_search_tests():
     """Executa testes manualmente."""
-    import sys
 
     print("\n" + "=" * 60)
     print("TESTES - HYBRID SEARCH")

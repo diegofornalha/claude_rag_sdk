@@ -33,7 +33,7 @@ services:
     volumes:
       # Persistir dados
       - ./data:/app/data
-      - ./outputs:/app/outputs
+      - ./artifacts:/app/artifacts
       - ./.agentfs:/app/.agentfs
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]

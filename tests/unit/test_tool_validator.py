@@ -4,8 +4,6 @@
 # Testes unitários para validação de tools do agente
 # =============================================================================
 
-import pytest
-
 
 class TestBlockReason:
     """Testes para BlockReason enum."""
@@ -38,7 +36,7 @@ class TestValidationResult:
 
     def test_invalid_result(self):
         """Verifica resultado inválido."""
-        from claude_rag_sdk.core.tool_validator import ValidationResult, BlockReason
+        from claude_rag_sdk.core.tool_validator import BlockReason, ValidationResult
 
         result = ValidationResult(
             is_valid=False,
@@ -111,13 +109,13 @@ class TestToolValidator:
         ]
 
         for tool in mcp_tools:
-            result = validator.validate(tool, {})
+            validator.validate(tool, {})
             # Pode permitir ou bloquear dependendo da configuração
             # O importante é não crashar
 
     def test_detects_suspicious_input(self):
         """Verifica detecção de input suspeito."""
-        from claude_rag_sdk.core.tool_validator import ToolValidator, BlockReason
+        from claude_rag_sdk.core.tool_validator import BlockReason, ToolValidator
 
         validator = ToolValidator()
 
@@ -142,12 +140,12 @@ class TestToolValidator:
         ]
 
         for input_data in suspicious_inputs:
-            result = validator.validate("rag_search", input_data)
+            validator.validate("rag_search", input_data)
             # Pode permitir ou bloquear, mas deve processar sem crash
 
     def test_validates_namespace(self):
         """Verifica validação de namespace."""
-        from claude_rag_sdk.core.tool_validator import ToolValidator, BlockReason
+        from claude_rag_sdk.core.tool_validator import BlockReason, ToolValidator
 
         validator = ToolValidator()
 
@@ -218,7 +216,7 @@ class TestToolValidatorConfiguration:
 
         # Se suportar modo estrito
         try:
-            validator = ToolValidator(strict=True)
+            ToolValidator(strict=True)
             # Em modo estrito, deve ser mais restritivo
         except TypeError:
             pass

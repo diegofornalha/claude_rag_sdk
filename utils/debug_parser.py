@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # Debug directory (Claude Code CLI logs)
 DEBUG_DIR = Path.home() / ".claude" / "debug"
@@ -18,8 +17,8 @@ class DebugEntry:
     timestamp_ms: int
     level: str
     message: str
-    tool_name: Optional[str] = None
-    event_type: Optional[str] = None  # pre_hook, post_hook, file_write, stream, temp_file
+    tool_name: str | None = None
+    event_type: str | None = None  # pre_hook, post_hook, file_write, stream, temp_file
 
 
 def parse_debug_file(session_id: str) -> list[DebugEntry]:
@@ -32,7 +31,7 @@ def parse_debug_file(session_id: str) -> list[DebugEntry]:
     pattern = r"^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+\[(\w+)\]\s+(.+)$"
 
     try:
-        with open(debug_file, "r") as f:
+        with open(debug_file) as f:
             for line in f:
                 match = re.match(pattern, line.strip())
                 if match:
@@ -75,7 +74,7 @@ def parse_debug_file(session_id: str) -> list[DebugEntry]:
                             event_type=event_type,
                         )
                     )
-    except (OSError, IOError, ValueError) as e:
+    except (OSError, ValueError) as e:
         print(f"[WARN] Could not parse debug file {session_id}: {e}")
 
     return entries

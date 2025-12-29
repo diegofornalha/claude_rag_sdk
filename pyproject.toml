@@ -96,6 +96,30 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106"]
+# Scripts de desenvolvimento - subprocess, hash e segurança são aceitáveis
+"scripts/**/*.py" = ["S603", "S607", "S110", "S324"]
+# AgentFS SDK é submódulo - ignorar todos os avisos de segurança
+"agentfs/**/*.py" = ["S101", "S603", "S607", "S608", "S110", "UP035"]
+# Utils de desenvolvimento
+"utils/file_watcher.py" = ["S603", "S607"]
+"utils/mcp_neo4j_bridge.py" = ["S107"]
+# Imports condicionais são intencionais
+"server.py" = ["E402", "S104"]
+"routers/chat.py" = ["E402", "S108", "S110"]
+"claude_rag_sdk/core/rate_limiter.py" = ["E402"]
+# Circuit breaker usa random para jitter - não é criptográfico
+"claude_rag_sdk/core/circuit_breaker.py" = ["S311"]
+# SDK hooks pode usar /tmp para artifacts
+"claude_rag_sdk/core/sdk_hooks.py" = ["S108"]
+# MCP client usa subprocess de forma segura
+"claude_rag_sdk/mcp/client.py" = ["S603", "S110"]
+# Hybrid search constrói SQL de forma segura (valores escapados)
+"claude_rag_sdk/core/hybrid_search.py" = ["S608"]
+# Database pool - ignorar falhas de conexão/cleanup é intencional
+"claude_rag_sdk/core/database.py" = ["S110"]
+# Routers - leitura de valores opcionais, cleanup graceful
+"routers/sessions.py" = ["S110"]
+"routers/audit.py" = ["S110"]
 
 [tool.ruff.format]
 quote-style = "double"

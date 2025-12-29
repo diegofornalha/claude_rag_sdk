@@ -34,6 +34,7 @@ from routers import (
     rag_router,
     sessions_router,
 )
+from routers.v1 import v1_router
 
 # from routers.neo4j_mcp import router as neo4j_mcp_router  # Bridge desnecessário - SDK funciona agora!
 
@@ -193,6 +194,10 @@ if SLOWAPI_AVAILABLE:
 # ROUTERS
 # =============================================================================
 
+# API v1 - versionada (recomendada para novos clientes)
+app.include_router(v1_router, prefix="/v1", tags=["v1"])
+
+# Routers sem prefixo - compatibilidade legada (deprecated)
 app.include_router(chat_router)
 app.include_router(rag_router)
 app.include_router(sessions_router)

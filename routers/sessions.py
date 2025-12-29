@@ -1,5 +1,7 @@
 """Sessions endpoints."""
 
+import os
+import re
 import shutil
 from pathlib import Path
 
@@ -15,11 +17,13 @@ from app_state import (
 )
 from claude_rag_sdk.core.auth import verify_api_key
 from claude_rag_sdk.core.guest_limits import get_guest_limit_manager
+from claude_rag_sdk.core.logger import get_logger
 from claude_rag_sdk.core.rate_limiter import get_limiter
 from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Sessions"])
 limiter = get_limiter()
+logger = get_logger("sessions")
 
 
 @router.get("/session/current")
@@ -42,7 +46,7 @@ async def get_current_session():
         try:
             session_info = await app_state.agentfs.kv.get("session:info")
             output_files = await app_state.agentfs.fs.readdir("/artifacts")
-        except (OSError, IOError, KeyError):
+        except (OSError, KeyError):
             pass  # Session info is optional, continue without it
 
     return {
@@ -62,7 +66,7 @@ async def reset_endpoint(request: Request, api_key: str = Depends(verify_api_key
     old_session = app_state.current_session_id
 
     # Obter projeto do header ou body ANTES de criar a sessão
-    project = request.headers.get("X-Client-Project", "chat-simples")
+    project = request.headers.get("X-Client-Project", "default")
     try:
         body = await request.json()
         project = body.get("project", project)
@@ -114,13 +118,22 @@ async def list_sessions(request: Request, user_id: str = None):
             f for f in db_files if not f.name.endswith(("-wal", "-shm", ".db-wal", ".db-shm"))
         ]
 
-        # Filtrar arquivos que ainda existem (podem ter sido deletados)
+        # Filtrar arquivos que ainda existem e são UUIDs válidos
+        uuid_pattern = re.compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+        )
         valid_db_files = []
         for f in db_files:
             try:
                 f.stat()  # Verifica se existe
                 # Filtrar sessões internas do Claude Code (agent-*)
                 if f.stem.startswith("agent-"):
+                    continue
+                # IMPORTANTE: Só aceitar nomes que são UUIDs válidos
+                # Isso previne sessões inválidas como "audit", "test", etc
+                session_name = f.stem.replace("_rag", "")
+                if not uuid_pattern.match(session_name):
+                    logger.warning(f"Sessão ignorada (nome inválido): {f.stem}")
                     continue
                 valid_db_files.append(f)
             except FileNotFoundError:
@@ -138,13 +151,13 @@ async def list_sessions(request: Request, user_id: str = None):
             jsonl_file = SESSIONS_DIR / f"{session_id}.jsonl"
             if jsonl_file.exists():
                 try:
-                    with open(jsonl_file, "r") as f:
+                    with open(jsonl_file) as f:
                         message_count = len(f.readlines())
-                except (OSError, IOError):
+                except OSError:
                     pass  # File read failed, continue with count=0
 
             session_agentfs = None
-            project = "chat-simples"  # Default
+            project = "default"  # Default
             title = None  # Título customizado
             favorite = False  # Favorito
             assigned_project_id = None  # Projeto atribuído
@@ -209,7 +222,7 @@ async def list_sessions(request: Request, user_id: str = None):
                 try:
                     artifacts = await session_agentfs.fs.readdir("/artifacts")
                     output_count = len(artifacts) if artifacts else 0
-                except (OSError, IOError, FileNotFoundError):
+                except (OSError, FileNotFoundError):
                     output_count = 0  # No artifacts directory or read failed
             except Exception as e:
                 print(f"[WARN] Could not read session {session_id}: {e}")
@@ -269,7 +282,7 @@ async def list_sessions(request: Request, user_id: str = None):
                 is_claude_code_session = False
                 message_count = 0
                 try:
-                    with open(jsonl_file, "r") as f:
+                    with open(jsonl_file) as f:
                         lines = f.readlines()
                         message_count = len(lines)
                         for line in lines[:5]:
@@ -280,7 +293,7 @@ async def list_sessions(request: Request, user_id: str = None):
                             # Se tem gitBranch mas não é nossa, é do Claude Code
                             if '"gitBranch"' in line and not is_our_session:
                                 is_claude_code_session = True
-                except (OSError, IOError):
+                except OSError:
                     pass  # File read failed, continue with count=0
 
                 # Ignorar sessões do Claude Code que não são nossas
@@ -382,8 +395,8 @@ async def update_session(session_id: str, request: Request):
 
     try:
         body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from e
 
     # Verificar se há pelo menos um campo para atualizar
     title = body.get("title")
@@ -434,7 +447,7 @@ async def update_session(session_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update session: {e}") from e
     finally:
         if session_agentfs:
             await session_agentfs.close()
@@ -462,8 +475,8 @@ async def claim_session(session_id: str, request: Request):
 
     try:
         body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from e
 
     user_id = body.get("user_id")
     if not user_id or not isinstance(user_id, str):
@@ -498,7 +511,7 @@ async def claim_session(session_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to claim session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to claim session: {e}") from e
     finally:
         if session_agentfs:
             await session_agentfs.close()
@@ -553,7 +566,7 @@ async def get_session_messages(session_id: str):
     if jsonl_file:
         messages = []
         try:
-            with open(jsonl_file, "r") as f:
+            with open(jsonl_file) as f:
                 for line in f:
                     try:
                         entry = json.loads(line.strip())
@@ -574,7 +587,7 @@ async def get_session_messages(session_id: str):
                         continue  # Skip malformed JSON lines
             return {"messages": messages, "count": len(messages), "type": "jsonl"}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     # Tentar carregar do AgentFS - primeiro verifica se é a sessão atual
     if app_state.agentfs and app_state.current_session_id == session_id:
@@ -590,7 +603,7 @@ async def get_session_messages(session_id: str):
             ]
             return {"messages": filtered_history, "count": len(filtered_history), "type": "agentfs"}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     # Se não é a sessão atual, tenta abrir o AgentFS da sessão solicitada
     session_db = AGENTFS_DIR / f"{session_id}.db"
@@ -609,7 +622,7 @@ async def get_session_messages(session_id: str):
             ]
             return {"messages": filtered_history, "count": len(filtered_history), "type": "agentfs"}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
         finally:
             if session_agentfs:
                 await session_agentfs.close()

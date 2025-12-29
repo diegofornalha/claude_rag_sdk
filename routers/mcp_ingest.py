@@ -17,8 +17,6 @@ Endpoints:
 import asyncio
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -42,13 +40,13 @@ class AdapterInfo(BaseModel):
     version: str
     enabled: bool
     status: str
-    tools: List[str] = []
+    tools: list[str] = []
 
 
 class IngestRequest(BaseModel):
     """Request para ingestão de documentos."""
 
-    queries: List[str] = Field(default=[], description="Lista de queries para buscar documentação")
+    queries: list[str] = Field(default=[], description="Lista de queries para buscar documentação")
     include_examples: bool = Field(default=True, description="Incluir exemplos de código")
     include_best_practices: bool = Field(default=True, description="Incluir best practices")
 
@@ -58,7 +56,7 @@ class IngestResult(BaseModel):
 
     success: bool
     documents_ingested: int = 0
-    errors: List[str] = []
+    errors: list[str] = []
     duration_seconds: float = 0.0
 
 
@@ -69,7 +67,7 @@ class MCPStatus(BaseModel):
     adapters_registered: int
     adapters_enabled: int
     adapters_connected: int
-    enabled_list: List[str] = []
+    enabled_list: list[str] = []
 
 
 # === Helper Functions ===
@@ -141,7 +139,7 @@ async def get_mcp_status() -> MCPStatus:
 
 
 @router.get("/adapters")
-async def list_adapters() -> List[AdapterInfo]:
+async def list_adapters() -> list[AdapterInfo]:
     """
     Lista todos os adapters MCP registrados.
 
@@ -323,7 +321,7 @@ async def ingest_from_adapter_sync(
 
 async def _run_ingest_task(
     adapter_name: str,
-    queries: Optional[List[str]],
+    queries: list[str] | None,
     include_examples: bool,
     include_best_practices: bool,
 ) -> IngestResult:
@@ -333,7 +331,7 @@ async def _run_ingest_task(
     Esta função é chamada tanto pelo endpoint síncrono quanto pelo assíncrono.
     """
     start_time = datetime.now()
-    errors: List[str] = []
+    errors: list[str] = []
     documents_ingested = 0
 
     try:

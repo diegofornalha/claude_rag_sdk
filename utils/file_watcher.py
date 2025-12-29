@@ -3,7 +3,6 @@
 import subprocess
 import threading
 from pathlib import Path
-from typing import Optional
 
 from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -24,7 +23,7 @@ class BackendFileHandler(FileSystemEventHandler):
         self.last_run = 0
         self.pending_files = set()
         self._lock = threading.Lock()
-        self._timer: Optional[threading.Timer] = None
+        self._timer: threading.Timer | None = None
 
     def on_modified(self, event):
         """Chamado quando arquivo é modificado."""
@@ -119,8 +118,8 @@ class FileWatcherService:
     def __init__(self, backend_path: Path, ingest_script_path: Path):
         self.backend_path = backend_path
         self.ingest_script = ingest_script_path
-        self.observer: Optional[Observer] = None
-        self.handler: Optional[BackendFileHandler] = None
+        self.observer: Observer | None = None
+        self.handler: BackendFileHandler | None = None
         self._enabled = False
 
     def start(self):
@@ -176,7 +175,7 @@ class FileWatcherService:
 
 
 # Global instance
-_watcher: Optional[FileWatcherService] = None
+_watcher: FileWatcherService | None = None
 
 
 def get_watcher() -> FileWatcherService:

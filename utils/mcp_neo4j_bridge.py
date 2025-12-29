@@ -8,7 +8,7 @@ e disponibilizar as ferramentas ao backend.
 
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Any
 
 
 class MCPNeo4jBridge:
@@ -171,7 +171,7 @@ class MCPNeo4jBridge:
 
 
 # Singleton
-_bridge: Optional[MCPNeo4jBridge] = None
+_bridge: MCPNeo4jBridge | None = None
 
 
 def get_neo4j_bridge() -> MCPNeo4jBridge:

@@ -4,9 +4,10 @@
 # Testes unitários para controle de taxa de requisições
 # =============================================================================
 
-import pytest
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 
 
 class TestRateLimitConfig:
@@ -75,7 +76,7 @@ class TestSlidingWindowRateLimiter:
 
     def test_allows_first_request(self):
         """Verifica primeira requisição é permitida."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(requests_per_minute=10)
         limiter = SlidingWindowRateLimiter(config)
@@ -87,13 +88,13 @@ class TestSlidingWindowRateLimiter:
 
     def test_allows_within_limit(self):
         """Verifica requisições dentro do limite."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(requests_per_minute=10)
         limiter = SlidingWindowRateLimiter(config)
 
         # 5 requisições
-        for i in range(5):
+        for _i in range(5):
             result = limiter.check("user1")
             assert result.allowed is True
 
@@ -102,7 +103,7 @@ class TestSlidingWindowRateLimiter:
 
     def test_blocks_over_limit(self):
         """Verifica bloqueio acima do limite."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(requests_per_minute=5)
         limiter = SlidingWindowRateLimiter(config)
@@ -119,7 +120,7 @@ class TestSlidingWindowRateLimiter:
 
     def test_separate_users(self):
         """Verifica usuários têm limites separados."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(requests_per_minute=5)
         limiter = SlidingWindowRateLimiter(config)
@@ -134,7 +135,7 @@ class TestSlidingWindowRateLimiter:
 
     def test_reset_after_window(self):
         """Verifica reset após janela de tempo."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(requests_per_minute=2)
         limiter = SlidingWindowRateLimiter(config)
@@ -152,7 +153,7 @@ class TestSlidingWindowRateLimiter:
 
     def test_get_usage_stats(self):
         """Verifica estatísticas de uso."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(requests_per_minute=10)
         limiter = SlidingWindowRateLimiter(config)
@@ -173,7 +174,7 @@ class TestRateLimitDecorator:
 
     def test_decorator_allows_request(self):
         """Verifica decorator permite requisição."""
-        from claude_rag_sdk.core.rate_limiter import rate_limit, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, rate_limit
 
         config = RateLimitConfig(requests_per_minute=10)
 
@@ -186,7 +187,7 @@ class TestRateLimitDecorator:
 
     def test_decorator_blocks_request(self):
         """Verifica decorator bloqueia requisição."""
-        from claude_rag_sdk.core.rate_limiter import rate_limit, RateLimitConfig, RateLimitExceeded
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, RateLimitExceeded, rate_limit
 
         config = RateLimitConfig(requests_per_minute=2)
 
@@ -208,7 +209,7 @@ class TestBurstHandling:
 
     def test_burst_allowed(self):
         """Verifica burst é permitido."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(
             requests_per_minute=10,
@@ -223,7 +224,7 @@ class TestBurstHandling:
 
     def test_burst_exceeded(self):
         """Verifica burst excedido é bloqueado."""
-        from claude_rag_sdk.core.rate_limiter import SlidingWindowRateLimiter, RateLimitConfig
+        from claude_rag_sdk.core.rate_limiter import RateLimitConfig, SlidingWindowRateLimiter
 
         config = RateLimitConfig(
             requests_per_minute=100,  # Alto, para não ser o limitador

@@ -118,7 +118,7 @@ async def get_artifact_file(request: Request, filename: str):
         }
     except Exception as e:
         print(f"[ERROR] Failed to read file {filename}: {e}")
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="File not found") from e
 
 
 @router.post("/write")
@@ -143,7 +143,7 @@ async def write_artifact_file(
         }
     except Exception as e:
         print(f"[ERROR] Failed to write file {filename}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to write file")
+        raise HTTPException(status_code=500, detail="Failed to write file") from e
 
 
 @router.delete("/{filename:path}")

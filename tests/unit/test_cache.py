@@ -4,9 +4,9 @@
 # Testes unitários para sistema de cache
 # =============================================================================
 
-import pytest
 import time
-from unittest.mock import patch
+
+import pytest
 
 
 class TestLRUCache:
@@ -204,7 +204,7 @@ class TestEmbeddingCache:
         cache.set("  Texto com espaços  ", embedding)
 
         # Se normalizado, deve encontrar com texto limpo
-        result = cache.get("Texto com espaços")
+        cache.get("Texto com espaços")
 
         # Pode ser None se não normalizar, ou embedding se normalizar
         # Depende da implementação
@@ -219,11 +219,11 @@ class TestEmbeddingCache:
         embeddings = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
 
         # Cache batch
-        for text, emb in zip(texts, embeddings):
+        for text, emb in zip(texts, embeddings, strict=False):
             cache.set(text, emb)
 
         # Verificar todos
-        for text, expected in zip(texts, embeddings):
+        for text, expected in zip(texts, embeddings, strict=False):
             assert cache.get(text) == expected
 
 

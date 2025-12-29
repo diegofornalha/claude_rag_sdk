@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentfs_sdk import AgentFS
@@ -29,9 +29,9 @@ SESSIONS_DIR = (
 )
 
 # Global client and AgentFS instances
-client: Optional[ClaudeSDKClient] = None
-agentfs: Optional[AgentFS] = None
-current_session_id: Optional[str] = None
+client: ClaudeSDKClient | None = None
+agentfs: AgentFS | None = None
+current_session_id: str | None = None
 current_model: str = "haiku"  # Modelo atual: haiku, sonnet, opus
 
 
@@ -40,7 +40,7 @@ current_model: str = "haiku"  # Modelo atual: haiku, sonnet, opus
 # =============================================================================
 
 
-def extract_session_id_from_jsonl(min_timestamp: Optional[float] = None) -> Optional[str]:
+def extract_session_id_from_jsonl(min_timestamp: float | None = None) -> str | None:
     """Extrai session_id do arquivo JSONL mais recente.
 
     Args:
@@ -73,7 +73,7 @@ def extract_session_id_from_jsonl(min_timestamp: Optional[float] = None) -> Opti
 
     # Tentar validar lendo o conteúdo (opcional)
     try:
-        with open(latest_jsonl, "r") as f:
+        with open(latest_jsonl) as f:
             first_line = f.readline().strip()
             if first_line:
                 data = json.loads(first_line)
@@ -83,7 +83,7 @@ def extract_session_id_from_jsonl(min_timestamp: Optional[float] = None) -> Opti
                     print(
                         f"[WARN] sessionId mismatch: file={session_id}, content={content_session_id}"
                     )
-    except (OSError, IOError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError):
         pass  # Ignorar erros de leitura, usar nome do arquivo
 
     return session_id
@@ -112,9 +112,9 @@ def _get_agent_model(model_name: str) -> tuple[AgentModel, str]:
 
 
 async def get_client(
-    model: Optional[str] = None,
-    project: Optional[str] = None,
-    resume_session: Optional[str] = None,
+    model: str | None = None,
+    project: str | None = None,
+    resume_session: str | None = None,
     fork_session: bool = False,
 ) -> ClaudeSDKClient:
     """Get ClaudeSDKClient instance (manages sessions automatically).
@@ -195,7 +195,7 @@ async def get_client(
         mcp_config_path = Path.home() / ".mcp.json"
         if mcp_config_path.exists():
             try:
-                with open(mcp_config_path, "r") as f:
+                with open(mcp_config_path) as f:
                     mcp_config = json.load(f)
                     mcp_servers_dict = mcp_config.get("mcpServers", {})
 
@@ -349,7 +349,7 @@ async def clear_session():
     print(f"[INFO] Session cleared: {old_session} (new session will be created on first message)")
 
 
-async def reset_session(project: Optional[str] = None):
+async def reset_session(project: str | None = None):
     """Reset session (creates new ClaudeSDKClient + AgentFS).
 
     Args:
@@ -372,7 +372,7 @@ async def reset_session(project: Optional[str] = None):
     print(f"[INFO] Session reset: {old_session} -> {current_session_id} (projeto: {project})")
 
 
-def get_current_session_id() -> Optional[str]:
+def get_current_session_id() -> str | None:
     """Get current session ID."""
     global current_session_id
 
@@ -383,7 +383,7 @@ def get_current_session_id() -> Optional[str]:
     if session_file.exists():
         try:
             return session_file.read_text().strip()
-        except (OSError, IOError):
+        except OSError:
             pass  # File read failed, return None
 
     return None

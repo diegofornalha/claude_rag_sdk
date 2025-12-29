@@ -31,10 +31,10 @@ async def get_filesystem_tree(path: str = "/"):
                             item["type"] = "directory"
                         else:
                             item["type"] = "file"
-                    except (OSError, IOError, PermissionError):
+                    except (OSError, PermissionError):
                         item["type"] = "file"  # Fallback if can't list children
                     items.append(item)
-            except (OSError, IOError, PermissionError):
+            except (OSError, PermissionError):
                 pass  # Skip inaccessible directories
             return items
 
@@ -75,4 +75,4 @@ async def get_kv(key: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -4,9 +4,7 @@
 # Testes unitários para autenticação e autorização
 # =============================================================================
 
-import pytest
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class TestAPIKeyManager:

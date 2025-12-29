@@ -11,7 +11,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 # Diretório raiz do projeto
 ROOT_DIR = Path(__file__).parent.parent
 TESTS_DIR = ROOT_DIR / "tests"
@@ -19,9 +18,9 @@ TESTS_DIR = ROOT_DIR / "tests"
 
 def run_command(cmd: list[str], description: str) -> tuple[bool, str]:
     """Executa comando e retorna resultado."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {description}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     try:
         result = subprocess.run(
@@ -91,13 +90,14 @@ def run_specific_test(test_path: str, verbose: bool = False) -> bool:
 
 def check_test_environment() -> bool:
     """Verifica ambiente de testes."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  VERIFICANDO AMBIENTE")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     # Verificar pytest
     try:
         import pytest
+
         print(f"✓ pytest versão {pytest.__version__}")
     except ImportError:
         print("✗ pytest não instalado")
@@ -107,7 +107,7 @@ def check_test_environment() -> bool:
     if not TESTS_DIR.exists():
         print("✗ Diretório tests/ não encontrado")
         return False
-    print(f"✓ Diretório tests/ encontrado")
+    print("✓ Diretório tests/ encontrado")
 
     # Contar testes
     test_files = list(TESTS_DIR.rglob("test_*.py"))
@@ -134,25 +134,29 @@ def main():
     )
 
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Output verboso",
     )
 
     parser.add_argument(
-        "-c", "--coverage",
+        "-c",
+        "--coverage",
         action="store_true",
         help="Gerar relatório de cobertura",
     )
 
     parser.add_argument(
-        "-f", "--file",
+        "-f",
+        "--file",
         type=str,
         help="Executar arquivo de teste específico",
     )
 
     parser.add_argument(
-        "-x", "--exitfirst",
+        "-x",
+        "--exitfirst",
         action="store_true",
         help="Parar no primeiro erro",
     )
@@ -163,9 +167,9 @@ def main():
     os.environ["PYTHONPATH"] = str(ROOT_DIR) + ":" + os.environ.get("PYTHONPATH", "")
 
     # Header
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  CHAT SIMPLES - TEST RUNNER")
-    print("="*60)
+    print("=" * 60)
 
     # Verificar ambiente
     if args.type == "check":
@@ -199,9 +203,9 @@ def main():
         results["performance"] = run_performance_tests(args.verbose)
 
     # Sumário
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  SUMÁRIO")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     all_passed = True
     for test_type, passed in results.items():
@@ -210,14 +214,14 @@ def main():
         if not passed:
             all_passed = False
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
 
     if all_passed:
         print("  ✓ TODOS OS TESTES PASSARAM!")
     else:
         print("  ✗ ALGUNS TESTES FALHARAM")
 
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     return 0 if all_passed else 1
 

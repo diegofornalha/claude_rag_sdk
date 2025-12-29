@@ -38,7 +38,7 @@ async def rag_search(
         }
     except Exception as e:
         print(f"[ERROR] RAG search failed: {e}")
-        raise HTTPException(status_code=500, detail="Search failed")
+        raise HTTPException(status_code=500, detail="Search failed") from e
     finally:
         if temp_rag:
             await temp_rag.close()
@@ -108,7 +108,7 @@ async def rag_ingest(
         return result.to_dict()
     except Exception as e:
         print(f"[ERROR] RAG ingest failed: {e}")
-        raise HTTPException(status_code=500, detail="Ingest failed")
+        raise HTTPException(status_code=500, detail="Ingest failed") from e
     finally:
         if temp_rag:
             await temp_rag.close()
@@ -127,7 +127,7 @@ async def rag_stats(request: Request):
         return stats
     except Exception as e:
         print(f"[ERROR] RAG stats failed: {e}")
-        raise HTTPException(status_code=500, detail="Stats retrieval failed")
+        raise HTTPException(status_code=500, detail="Stats retrieval failed") from e
     finally:
         if temp_rag:
             await temp_rag.close()
@@ -160,9 +160,9 @@ async def reingest_backend(request: Request, api_key: str = Depends(verify_api_k
                 process.communicate(),
                 timeout=300,  # 5 min timeout
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             process.kill()
-            raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
+            raise HTTPException(status_code=504, detail="Ingest timeout (5 min)") from e
 
         return {
             "success": process.returncode == 0,
@@ -174,7 +174,7 @@ async def reingest_backend(request: Request, api_key: str = Depends(verify_api_k
         raise
     except Exception as e:
         print(f"[ERROR] Reingest failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/reingest/sdk")
@@ -204,9 +204,9 @@ async def reingest_sdk(request: Request, api_key: str = Depends(verify_api_key))
                 process.communicate(),
                 timeout=300,  # 5 min timeout
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             process.kill()
-            raise HTTPException(status_code=504, detail="Ingest timeout (5 min)")
+            raise HTTPException(status_code=504, detail="Ingest timeout (5 min)") from e
 
         return {
             "success": process.returncode == 0,
@@ -218,7 +218,7 @@ async def reingest_sdk(request: Request, api_key: str = Depends(verify_api_key))
         raise
     except Exception as e:
         print(f"[ERROR] SDK reingest failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/config")
@@ -286,7 +286,7 @@ async def watcher_start(api_key: str = Depends(verify_api_key)):
         }
     except Exception as e:
         print(f"[ERROR] Failed to start watcher: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start watcher: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start watcher: {str(e)}") from e
 
 
 @router.post("/watcher/stop")
@@ -302,7 +302,7 @@ async def watcher_stop(api_key: str = Depends(verify_api_key)):
         }
     except Exception as e:
         print(f"[ERROR] Failed to stop watcher: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to stop watcher: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to stop watcher: {str(e)}") from e
 
 
 @router.delete("/reset")
@@ -342,7 +342,9 @@ async def rag_reset(api_key: str = Depends(verify_api_key)):
             "deleted_files": deleted,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete RAG database: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete RAG database: {str(e)}"
+        ) from e
 
 
 def _format_size(size_bytes: int) -> str:
@@ -467,7 +469,7 @@ async def get_document(doc_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.delete("/documents/{doc_id}")
@@ -513,7 +515,7 @@ async def delete_document(doc_id: int, api_key: str = Depends(verify_api_key)):
         raise
     except Exception as e:
         print(f"[ERROR] Delete document failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete document")
+        raise HTTPException(status_code=500, detail="Failed to delete document") from e
     finally:
         if conn:
             conn.close()

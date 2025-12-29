@@ -4,9 +4,10 @@
 # Testes unitários para busca adaptativa com top-k dinâmico
 # =============================================================================
 
-import pytest
 from dataclasses import dataclass
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 @dataclass
@@ -357,7 +358,6 @@ class TestSearchResultProtocol:
 
 def run_adaptive_search_tests():
     """Executa testes manualmente."""
-    import sys
 
     print("\n" + "=" * 60)
     print("TESTES - ADAPTIVE SEARCH")

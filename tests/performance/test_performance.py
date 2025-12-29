@@ -4,13 +4,11 @@
 # Testes de carga e performance para endpoints críticos
 # =============================================================================
 
-import asyncio
 import os
 import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Callable
 from unittest.mock import patch
 
 import pytest
@@ -52,6 +50,7 @@ def setup_test_environment():
 def client():
     """Cliente de teste FastAPI."""
     from fastapi.testclient import TestClient
+
     from server import app
 
     return TestClient(app)
@@ -499,7 +498,6 @@ class TestAdaptiveSearchPerformance:
 
 def run_performance_tests():
     """Executa testes de performance manualmente."""
-    import sys
 
     print("\n" + "=" * 60)
     print("TESTES DE PERFORMANCE")

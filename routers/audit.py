@@ -1,7 +1,6 @@
 """Audit endpoints."""
 
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Request
 
@@ -15,7 +14,7 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
 
 @router.get("/tools")
 @limiter.limit(RATE_LIMITS.get("default", "60/minute"))
-async def get_audit_tools(request: Request, limit: int = 100, session_id: Optional[str] = None):
+async def get_audit_tools(request: Request, limit: int = 100, session_id: str | None = None):
     """Get tool call history."""
     from agentfs_sdk import AgentFS, AgentFSOptions
 
@@ -79,7 +78,7 @@ async def get_audit_tools(request: Request, limit: int = 100, session_id: Option
 
 @router.get("/stats")
 @limiter.limit(RATE_LIMITS.get("default", "60/minute"))
-async def get_audit_stats(request: Request, session_id: Optional[str] = None):
+async def get_audit_stats(request: Request, session_id: str | None = None):
     """Get audit statistics."""
     from agentfs_sdk import AgentFS, AgentFSOptions
 
@@ -242,9 +241,9 @@ async def get_enriched_tools(session_id: str, limit: int = 50):
 
 @router.get("/hooks/events")
 async def get_hooks_events(
-    session_id: Optional[str] = None,
-    event_type: Optional[str] = None,
-    tool_name: Optional[str] = None,
+    session_id: str | None = None,
+    event_type: str | None = None,
+    tool_name: str | None = None,
     limit: int = 100,
 ):
     """
@@ -284,7 +283,7 @@ async def get_hooks_events(
 
 
 @router.get("/hooks/stats")
-async def get_hooks_stats(session_id: Optional[str] = None):
+async def get_hooks_stats(session_id: str | None = None):
     """
     Get statistics from SDK Hooks audit database.
 
@@ -301,7 +300,7 @@ async def get_hooks_stats(session_id: Optional[str] = None):
 
 
 @router.get("/hooks/blocked")
-async def get_blocked_events(session_id: Optional[str] = None, limit: int = 50):
+async def get_blocked_events(session_id: str | None = None, limit: int = 50):
     """
     Get blocked tool calls from SDK Hooks.
 

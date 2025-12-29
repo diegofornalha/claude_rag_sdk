@@ -13,7 +13,6 @@ import argparse
 import re
 from pathlib import Path
 
-
 # Padrões de conversão
 PATTERNS = {
     # [ERROR] messages
@@ -49,7 +48,7 @@ def analyze_file(filepath: Path) -> list[dict]:
     """Analisa um arquivo e retorna prints encontrados."""
     findings = []
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         lines = f.readlines()
 
     for i, line in enumerate(lines, 1):

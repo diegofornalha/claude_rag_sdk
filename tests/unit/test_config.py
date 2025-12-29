@@ -4,9 +4,8 @@
 # Testes unitários para configuração centralizada
 # =============================================================================
 
-import pytest
-from unittest.mock import patch
 import os
+from unittest.mock import patch
 
 
 class TestEmbeddingModel:
@@ -57,7 +56,7 @@ class TestRAGConfig:
 
     def test_from_env_defaults(self):
         """Verifica valores padrão do from_env."""
-        from claude_rag_sdk.core.config import RAGConfig, EmbeddingModel, ChunkingStrategy
+        from claude_rag_sdk.core.config import ChunkingStrategy, EmbeddingModel, RAGConfig
 
         with patch.dict(os.environ, {}, clear=True):
             config = RAGConfig.from_env()
@@ -70,7 +69,7 @@ class TestRAGConfig:
 
     def test_from_env_custom_values(self):
         """Verifica valores customizados via env vars."""
-        from claude_rag_sdk.core.config import RAGConfig, EmbeddingModel
+        from claude_rag_sdk.core.config import EmbeddingModel, RAGConfig
 
         env_vars = {
             "EMBEDDING_MODEL": "bge-large",
@@ -136,7 +135,7 @@ class TestGetConfig:
         """Verifica reload cria nova instância."""
         from claude_rag_sdk.core.config import get_config, reload_config
 
-        config1 = get_config()
+        get_config()
         config2 = reload_config()
 
         # Após reload, get_config deve retornar a nova
@@ -150,7 +149,7 @@ class TestConfigValidation:
 
     def test_invalid_embedding_model_falls_back(self):
         """Verifica fallback para modelo inválido."""
-        from claude_rag_sdk.core.config import RAGConfig, EmbeddingModel
+        from claude_rag_sdk.core.config import EmbeddingModel, RAGConfig
 
         env_vars = {"EMBEDDING_MODEL": "invalid-model-name"}
 

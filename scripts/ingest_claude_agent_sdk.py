@@ -127,7 +127,7 @@ async def main():
         print(f"   - Arquivos modificados/novos: {len(modified)}")
         if modified:
             print("\n📝 Arquivos para atualizar:")
-            for f, s in modified[:10]:
+            for _f, s in modified[:10]:
                 print(f"   - {s}")
             if len(modified) > 10:
                 print(f"   ... e mais {len(modified) - 10}")

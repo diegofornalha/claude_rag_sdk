@@ -4,12 +4,8 @@
 # Testes end-to-end simulando fluxo completo do usuário
 # =============================================================================
 
-import asyncio
-import json
 import os
-import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -32,6 +28,7 @@ def setup_test_environment():
 def client():
     """Cliente de teste FastAPI."""
     from fastapi.testclient import TestClient
+
     from server import app
 
     return TestClient(app)
@@ -111,7 +108,7 @@ class TestSessionLifecycle:
         sessions = []
 
         # Criar 3 sessões
-        for i in range(3):
+        for _i in range(3):
             response = client.post("/sessions")
             assert response.status_code == 200
             sessions.append(response.json()["session_id"])
@@ -375,7 +372,6 @@ class TestEdgeCasesE2E:
 
 def run_e2e_tests():
     """Executa testes E2E manualmente."""
-    import sys
 
     print("\n" + "=" * 60)
     print("TESTES E2E - FLUXO COMPLETO")

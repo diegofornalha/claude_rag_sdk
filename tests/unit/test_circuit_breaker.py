@@ -4,9 +4,9 @@
 # Testes unitários para resiliência contra falhas em cascata
 # =============================================================================
 
-import pytest
 import time
-from unittest.mock import patch, MagicMock
+
+import pytest
 
 
 class TestCircuitState:
@@ -60,7 +60,7 @@ class TestCircuitBreaker:
 
     def test_open_circuit_blocks_calls(self):
         """Verifica circuito aberto bloqueia chamadas."""
-        from claude_rag_sdk.core.circuit_breaker import CircuitBreaker, CircuitOpenError
+        from claude_rag_sdk.core.circuit_breaker import CircuitBreaker
 
         cb = CircuitBreaker(failure_threshold=2)
 
@@ -180,7 +180,7 @@ class TestCircuitBreakerDecorator:
 
     def test_decorator_records_failure(self):
         """Verifica decorator registra falha."""
-        from claude_rag_sdk.core.circuit_breaker import circuit_breaker, CircuitOpenError
+        from claude_rag_sdk.core.circuit_breaker import CircuitOpenError, circuit_breaker
 
         call_count = 0
 
@@ -244,7 +244,7 @@ class TestCircuitBreakerAsync:
     @pytest.mark.asyncio
     async def test_async_circuit_opens(self):
         """Verifica circuit breaker async abre com falhas."""
-        from claude_rag_sdk.core.circuit_breaker import async_circuit_breaker, CircuitOpenError
+        from claude_rag_sdk.core.circuit_breaker import CircuitOpenError, async_circuit_breaker
 
         @async_circuit_breaker(failure_threshold=2, recovery_timeout=10)
         async def async_failing():

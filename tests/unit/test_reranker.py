@@ -4,8 +4,9 @@
 # Testes unitários para re-ranking de resultados de busca
 # =============================================================================
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestRerankResult:
@@ -90,7 +91,7 @@ class TestLightweightReranker:
 
         # Doc com match exato deve ter score maior
         doc2_result = next(r for r in results if r.doc_id == 2)
-        doc1_result = next(r for r in results if r.doc_id == 1)
+        next(r for r in results if r.doc_id == 1)
 
         assert doc2_result.rerank_score > doc2_result.original_score
 
@@ -223,7 +224,7 @@ class TestCrossEncoderReranker:
             (2, "Document two", 0.5, {}),
         ]
 
-        results = reranker.rerank("query", documents, top_k=2)
+        reranker.rerank("query", documents, top_k=2)
 
         # Verificar que predict foi chamado
         mock_load_model.assert_called_once()
@@ -276,7 +277,7 @@ class TestCreateReranker:
 
     def test_create_lightweight(self):
         """Verifica criação de LightweightReranker."""
-        from claude_rag_sdk.core.reranker import create_reranker, LightweightReranker
+        from claude_rag_sdk.core.reranker import LightweightReranker, create_reranker
 
         reranker = create_reranker(use_cross_encoder=False)
 
@@ -284,7 +285,7 @@ class TestCreateReranker:
 
     def test_create_cross_encoder(self):
         """Verifica criação de CrossEncoderReranker."""
-        from claude_rag_sdk.core.reranker import create_reranker, CrossEncoderReranker
+        from claude_rag_sdk.core.reranker import CrossEncoderReranker, create_reranker
 
         reranker = create_reranker(use_cross_encoder=True)
 
@@ -292,7 +293,7 @@ class TestCreateReranker:
 
     def test_default_is_lightweight(self):
         """Verifica que padrão é LightweightReranker."""
-        from claude_rag_sdk.core.reranker import create_reranker, LightweightReranker
+        from claude_rag_sdk.core.reranker import LightweightReranker, create_reranker
 
         reranker = create_reranker()
 
@@ -419,7 +420,6 @@ class TestEdgeCases:
 
 def run_reranker_tests():
     """Executa testes manualmente."""
-    import sys
 
     print("\n" + "=" * 60)
     print("TESTES - RERANKER")

@@ -5,7 +5,7 @@
 # =============================================================================
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -27,6 +27,7 @@ def setup_test_environment():
 def client():
     """Cliente de teste FastAPI (não requer servidor rodando)."""
     from fastapi.testclient import TestClient
+
     from server import app
 
     return TestClient(app)
@@ -256,7 +257,6 @@ class TestSecurityHeaders:
 
 def run_integration_tests():
     """Executa testes de integração manualmente."""
-    import sys
 
     print("\n" + "=" * 60)
     print("TESTES DE INTEGRAÇÃO - ENDPOINTS")

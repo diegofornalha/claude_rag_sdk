@@ -67,7 +67,7 @@ COPY --from=builder /app/app_state.py ./
 COPY --from=builder /app/pyproject.toml ./
 
 # Criar diretórios necessários com permissões corretas
-RUN mkdir -p /app/data /app/outputs /app/.agentfs && \
+RUN mkdir -p /app/data /app/artifacts /app/.agentfs && \
     chown -R appuser:appgroup /app
 
 # Variáveis de ambiente

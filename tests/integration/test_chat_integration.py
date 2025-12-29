@@ -29,6 +29,7 @@ def setup_test_environment():
 def client():
     """Cliente de teste FastAPI."""
     from fastapi.testclient import TestClient
+
     from server import app
 
     return TestClient(app)
@@ -180,7 +181,7 @@ class TestSessionCommands:
             ("chama de Test", "test"),
         ]
 
-        for cmd, expected_name in test_cases:
+        for cmd, _expected_name in test_cases:
             command, data = detect_session_command(cmd)
             assert command == "rename", f"Falhou para: {cmd}"
             assert data is not None
@@ -248,7 +249,6 @@ class TestRAGContext:
     @patch("routers.chat.SearchEngine")
     async def test_rag_context_included(self, mock_engine_cls, mock_get_config):
         """Verifica que contexto RAG é incluído."""
-        from routers.chat import search_rag_context
 
         # Mock do config
         mock_config = MagicMock()
@@ -273,7 +273,6 @@ class TestRAGContext:
 
     async def test_rag_context_empty_when_no_db(self):
         """Verifica retorno vazio sem banco RAG."""
-        from routers.chat import search_rag_context
         from pathlib import Path
 
         # Se o banco não existe, deve retornar vazio
@@ -305,7 +304,6 @@ class TestAppendToJsonl:
     def test_append_creates_file(self, tmp_path):
         """Verifica criação de arquivo JSONL."""
         from routers.chat import append_to_jsonl
-        from app_state import SESSIONS_DIR
 
         # Mock do SESSIONS_DIR
         with patch("routers.chat.SESSIONS_DIR", tmp_path):
@@ -407,7 +405,7 @@ class TestRateLimiting:
 
     def test_rate_limit_headers(self, client):
         """Verifica headers de rate limit."""
-        response = client.post("/chat", json={"message": "test"})
+        client.post("/chat", json={"message": "test"})
 
         # Se rate limiting está ativo, pode ter headers específicos
         # Isso depende da configuração
@@ -431,7 +429,6 @@ class TestRateLimiting:
 
 def run_chat_integration_tests():
     """Executa testes manualmente."""
-    import sys
 
     print("\n" + "=" * 60)
     print("TESTES DE INTEGRAÇÃO - CHAT")

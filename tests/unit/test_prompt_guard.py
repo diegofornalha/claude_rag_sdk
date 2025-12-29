@@ -4,8 +4,6 @@
 # Testes unitários para proteção contra prompt injection
 # =============================================================================
 
-import pytest
-
 
 class TestThreatLevel:
     """Testes para ThreatLevel enum."""

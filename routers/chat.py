@@ -7,7 +7,6 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -16,10 +15,10 @@ from pydantic import BaseModel
 from app_state import SESSIONS_DIR, get_agentfs, get_client
 from claude_rag_sdk.core.auth import verify_api_key
 from claude_rag_sdk.core.guest_limits import GuestLimitAction, get_guest_limit_manager
-from claude_rag_sdk.core.sdk_hooks import set_current_session_id
 from claude_rag_sdk.core.logger import get_logger
 from claude_rag_sdk.core.prompt_guard import PromptGuard
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, get_limiter
+from claude_rag_sdk.core.sdk_hooks import set_current_session_id
 from utils.validators import validate_session_id
 
 router = APIRouter(tags=["Chat"])
@@ -118,7 +117,7 @@ async def execute_session_command(
 
 
 def append_to_jsonl(
-    session_id: str, user_message: str, assistant_response: str, parent_uuid: Optional[str] = None
+    session_id: str, user_message: str, assistant_response: str, parent_uuid: str | None = None
 ):
     """Append user and assistant messages to a session's JSONL file."""
     jsonl_file = SESSIONS_DIR / f"{session_id}.jsonl"
@@ -214,10 +213,10 @@ async def search_rag_context(query: str, top_k: int = 3) -> str:
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None
-    model: Optional[str] = "haiku"  # haiku, sonnet, opus
-    resume: Optional[bool] = False  # Resume previous conversation context
-    fork_session: Optional[bool] = False  # Fork instead of continue
+    session_id: str | None = None
+    model: str | None = "haiku"  # haiku, sonnet, opus
+    resume: bool | None = False  # Resume previous conversation context
+    fork_session: bool | None = False  # Fork instead of continue
 
 
 class ChatResponse(BaseModel):
@@ -239,8 +238,8 @@ async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depen
             status_code=400, detail=f"Message blocked: {scan_result.threat_level.value}"
         )
 
-    # Obter projeto do header (chat-simples HTML ou chat-angular)
-    project = request.headers.get("X-Client-Project", "chat-simples")
+    # Obter projeto do header (chat-angular ou outro)
+    project = request.headers.get("X-Client-Project", "default")
 
     try:
         # Configurar resume se solicitado
@@ -400,7 +399,7 @@ Pergunta do usuário: {chat_request.message}"""
 
     except Exception as e:
         print(f"[ERROR] Chat error: {e}")
-        raise HTTPException(status_code=500, detail="Chat processing failed")
+        raise HTTPException(status_code=500, detail="Chat processing failed") from e
     finally:
         if session_specific_afs:
             await session_specific_afs.close()
@@ -429,14 +428,16 @@ async def chat_stream(
         import app_state
 
         # Obter projeto do header (Angular envia X-Client-Project)
-        project = request.headers.get("X-Client-Project", "chat-simples")
+        project = request.headers.get("X-Client-Project", "default")
 
         # Determinar session_id a usar
         # IMPORTANTE: Guardamos referência ao client para NÃO criar sessões desnecessárias
         client_ref = None
 
         if chat_request.session_id:
-            # Frontend enviou session_id específico - MANTER essa sessão
+            # Frontend enviou session_id específico - VALIDAR e MANTER essa sessão
+            # Validar que é um UUID válido para prevenir criação de sessões indevidas
+            validate_session_id(chat_request.session_id)
             target_session_id = chat_request.session_id
             # SÓ obter client se já existir, NÃO criar nova sessão
             if app_state.client is not None:
@@ -719,4 +720,4 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
         print(f"[ERROR] Stream error: {e}")
         if afs:
             await afs.close()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

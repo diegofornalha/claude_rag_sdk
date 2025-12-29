@@ -2,7 +2,6 @@
 
 import re
 from pathlib import Path
-from typing import Optional
 
 from claude_rag_sdk.core.exceptions import (
     InvalidInputError,
@@ -13,19 +12,23 @@ from claude_rag_sdk.core.exceptions import (
 
 
 def validate_session_id(session_id: str) -> bool:
-    """Validate session_id to prevent path traversal attacks.
+    """Validate session_id to prevent path traversal attacks and invalid IDs.
 
+    Only accepts valid UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
     Returns True if valid, raises InvalidSessionIdError if invalid.
     """
     if not session_id:
         return False
-    # Only allow UUID-like patterns and alphanumeric with hyphens
-    if not re.match(r"^[a-zA-Z0-9\-_]+$", session_id):
+
+    # Only allow valid UUID format
+    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    if not re.match(uuid_pattern, session_id, re.IGNORECASE):
         raise InvalidSessionIdError(
-            message="Formato de session_id inválido",
+            message="session_id deve ser um UUID válido",
             details={"session_id": session_id[:20]},
         )
-    # Prevent path traversal
+
+    # Prevent path traversal (extra safety)
     if ".." in session_id or "/" in session_id or "\\" in session_id:
         raise PathTraversalError(
             message="Tentativa de path traversal detectada no session_id",
@@ -61,8 +64,8 @@ def validate_filename(filename: str) -> bool:
 
 def validate_directory_path(
     directory: str,
-    allowed_prefixes: Optional[list[str]] = None,
-    base_path: Optional[Path] = None,
+    allowed_prefixes: list[str] | None = None,
+    base_path: Path | None = None,
 ) -> bool:
     """Validate directory path to prevent traversal.
 
@@ -98,7 +101,7 @@ def validate_directory_path(
             raise ValidationError(
                 message="Caminho inválido",
                 details={"directory": directory[:100], "error": str(e)},
-            )
+            ) from e
 
     # Validate against whitelist if provided
     if allowed_prefixes:
@@ -139,4 +142,4 @@ def validate_file_path(file_path: str, base_path: Path) -> Path:
         raise ValidationError(
             message="Caminho de arquivo inválido",
             details={"path": file_path[:100], "error": str(e)},
-        )
+        ) from e
