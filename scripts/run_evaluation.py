@@ -131,7 +131,7 @@ async def main():
             if result.missing_keywords:
                 print(f"Keywords faltando: {', '.join(result.missing_keywords[:5])}")
 
-            print(f"\nResposta (primeiros 300 chars):")
+            print("\nResposta (primeiros 300 chars):")
             print(f"  {result.actual_answer[:300]}...")
 
     # Salvar relatório

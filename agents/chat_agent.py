@@ -13,18 +13,18 @@ import asyncio
 import json
 import re
 import uuid
-from dataclasses import dataclass, field
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncGenerator
 
 from agentfs_sdk import AgentFS, AgentFSOptions
 
+from agents.metrics import estimate_tokens, get_metrics_manager
 from app_state import SESSIONS_DIR, get_client, reset_session
 from claude_rag_sdk.core.logger import get_logger
 from claude_rag_sdk.core.sdk_hooks import set_current_session_id
 from utils.validators import validate_session_id
-from agents.metrics import get_metrics_manager, estimate_tokens
 
 logger = get_logger("chat_agent")
 
@@ -268,7 +268,6 @@ class ChatAgent:
         Yields:
             StreamChunk com texto, session_id, erros, etc.
         """
-        import app_state
 
         afs = None
         try:

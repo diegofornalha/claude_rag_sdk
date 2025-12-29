@@ -20,7 +20,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import httpx
 
@@ -48,7 +47,7 @@ class QuestionResult:
     keyword_match: bool
     has_citations: bool
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -104,7 +103,7 @@ def parse_csv(csv_path: Path) -> list[dict]:
 
     for encoding in encodings:
         try:
-            with open(csv_path, "r", encoding=encoding) as f:
+            with open(csv_path, encoding=encoding) as f:
                 content = f.read()
                 break
         except UnicodeDecodeError:
@@ -448,7 +447,7 @@ def generate_report(report: EvaluationReport, output_path: Path) -> None:
                 f.write(f"   ERRO: {r['error']}\n")
             f.write("\n")
 
-    print(f"\n📊 Relatórios gerados:")
+    print("\n📊 Relatórios gerados:")
     print(f"   JSON: {output_path}")
     print(f"   TXT:  {txt_path}")
 

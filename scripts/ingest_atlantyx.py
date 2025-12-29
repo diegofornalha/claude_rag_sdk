@@ -85,7 +85,7 @@ async def check_status():
     config = get_config()
     db_path = config.rag_db_path
 
-    print(f"\n📊 Status da Base RAG")
+    print("\n📊 Status da Base RAG")
     print(f"   DB Path: {db_path}")
     print(f"   Existe: {'✅' if db_path.exists() else '❌'}")
 
@@ -105,7 +105,7 @@ async def check_status():
                 # Listar fontes
                 cursor.execute("SELECT DISTINCT nome FROM documentos LIMIT 10")
                 sources = [row[0] for row in cursor.fetchall()]
-                print(f"   Fontes:")
+                print("   Fontes:")
                 for s in sources:
                     print(f"      - {s}")
         except Exception as e:
@@ -114,8 +114,9 @@ async def check_status():
 
 async def clear_database():
     """Limpa a base RAG."""
-    from claude_rag_sdk.core.config import get_config
     import os
+
+    from claude_rag_sdk.core.config import get_config
 
     config = get_config()
     db_path = config.rag_db_path
@@ -137,8 +138,8 @@ async def clear_database():
 
 async def ingest_documents(reingest: bool = False):
     """Ingere documentos do Atlantyx."""
-    from claude_rag_sdk.ingest import IngestEngine
     from claude_rag_sdk.core.config import get_config
+    from claude_rag_sdk.ingest import IngestEngine
 
     config = get_config()
 
@@ -204,7 +205,7 @@ async def ingest_documents(reingest: bool = False):
 
     # Resumo
     print("\n" + "=" * 50)
-    print(f"📊 Resumo da Ingestão")
+    print("📊 Resumo da Ingestão")
     print(f"   ✅ Sucesso: {success_count}")
     print(f"   ❌ Erros: {error_count}")
 

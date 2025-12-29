@@ -375,6 +375,7 @@ async def change_embedding_model(
     """
     import os
     from pathlib import Path
+
     from dotenv import set_key
 
     from claude_rag_sdk.core.config import EmbeddingModel, reload_config
@@ -398,7 +399,7 @@ async def change_embedding_model(
     os.environ["EMBEDDING_MODEL"] = model
 
     # Recarregar config
-    new_config = reload_config()
+    reload_config()
 
     return {
         "success": True,
@@ -831,7 +832,7 @@ def _calculate_confidence(answer: str, citations: list, search_results: list) ->
         confidence = max(0.1, confidence - 0.3)
 
     # +0.1 se usou múltiplas fontes
-    unique_sources = set(c["source"] for c in citations)
+    unique_sources = {c["source"] for c in citations}
     if len(unique_sources) >= 2:
         confidence += 0.1
 

@@ -225,7 +225,7 @@ async def get_client(
         client_options = engine._get_agent_options()
 
         # ====== RAG SDK MCP SERVER (in-process) ======
-        from claude_rag_sdk.rag_mcp.sdk_server import create_rag_sdk_server, RAG_ALLOWED_TOOLS
+        from claude_rag_sdk.rag_mcp.sdk_server import RAG_ALLOWED_TOOLS, create_rag_sdk_server
 
         rag_sdk_server = create_rag_sdk_server()
 

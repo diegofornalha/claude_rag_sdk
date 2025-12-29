@@ -2,7 +2,7 @@
 
 import time
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from app_state import AGENTFS_DIR, get_current_session_id
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, limiter

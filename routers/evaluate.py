@@ -3,7 +3,6 @@
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -233,7 +232,7 @@ async def run_evaluation_stream(
             detail="Avaliação já em andamento. Aguarde ou consulte /evaluate/status"
         )
 
-    from agents.evaluator import get_evaluator, EvaluationReport
+    from agents.evaluator import EvaluationReport, get_evaluator
 
     evaluator = get_evaluator()
 

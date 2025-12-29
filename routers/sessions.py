@@ -98,7 +98,6 @@ async def list_sessions(request: Request, user_id: str = None):
         - Em development: retorna todas se user_id não fornecido
         - Em production: exige user_id, retorna vazio se não fornecido
     """
-    import os
 
     from agentfs_sdk import AgentFS, AgentFSOptions
 

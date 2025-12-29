@@ -4,8 +4,9 @@
 # Testes unitários para o ChatAgent e componentes relacionados
 # =============================================================================
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestStreamChunk:
@@ -209,8 +210,9 @@ class TestAppendToJsonl:
 
     def test_creates_file_if_not_exists(self, tmp_path):
         """Verifica criação de arquivo."""
-        from agents.chat_agent import append_to_jsonl
         import json
+
+        from agents.chat_agent import append_to_jsonl
 
         # Patch SESSIONS_DIR
         with patch("agents.chat_agent.SESSIONS_DIR", tmp_path):
@@ -333,7 +335,7 @@ class TestChatAgent:
              patch("agents.chat_agent.get_client", return_value=mock_client), \
              patch("agents.chat_agent.set_current_session_id"), \
              patch("agents.chat_agent.append_to_jsonl"), \
-             patch("agents.chat_agent.reset_session") as mock_reset:
+             patch("agents.chat_agent.reset_session"):
 
             MockAgentFS.open = AsyncMock(return_value=mock_afs)
 
@@ -369,8 +371,9 @@ class TestChatAgentIntegration:
     @pytest.mark.asyncio
     async def test_full_chat_flow_mocked(self):
         """Verifica fluxo completo de chat com mocks."""
-        from agents.chat_agent import ChatAgent, ChatRequest
         from dataclasses import dataclass
+
+        from agents.chat_agent import ChatAgent, ChatRequest
 
         # Mocks
         mock_afs = MagicMock()

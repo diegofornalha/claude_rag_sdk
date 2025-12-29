@@ -278,7 +278,7 @@ class AgentFSPool:
     async def close_all(self):
         """Fecha todas as conexões."""
         async with self._lock:
-            for sid, (afs, _) in list(self._pool.items()):
+            for _sid, (afs, _) in list(self._pool.items()):
                 try:
                     await afs.close()
                 except Exception:

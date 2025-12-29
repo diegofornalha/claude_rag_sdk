@@ -674,6 +674,7 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                             ):
                                 try:
                                     from agentfs_sdk import AgentFS, AgentFSOptions
+
                                     from agents.title_generator import get_smart_title
 
                                     auto_title = await get_smart_title(
@@ -813,7 +814,7 @@ async def chat_stream_v2(
         raise HTTPException(
             status_code=429,
             detail=f"Rate limit exceeded: {rate_err}",
-        )
+        ) from rate_err
 
     # Obter projeto do header
     project = request.headers.get("X-Client-Project", "default")
