@@ -14,12 +14,16 @@ from pydantic import BaseModel
 
 from app_state import SESSIONS_DIR, get_agentfs, get_client
 from claude_rag_sdk.core.auth import verify_api_key
+from claude_rag_sdk.core.cache import get_response_cache
 from claude_rag_sdk.core.guest_limits import GuestLimitAction, get_guest_limit_manager
 from claude_rag_sdk.core.logger import get_logger
 from claude_rag_sdk.core.prompt_guard import PromptGuard
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, get_limiter
 from claude_rag_sdk.core.sdk_hooks import set_current_session_id
 from utils.validators import validate_session_id
+
+# Cache global para contexto RAG
+_rag_context_cache = get_response_cache()
 
 router = APIRouter(tags=["Chat"])
 logger = get_logger("chat")
@@ -179,13 +183,23 @@ limiter = get_limiter()
 prompt_guard = PromptGuard(strict_mode=False)
 
 
-async def search_rag_context(query: str, top_k: int = 3) -> str:
-    """Busca contexto relevante na base RAG."""
+async def search_rag_context(query: str, top_k: int = 5) -> str:
+    """Busca contexto relevante na base RAG com cache.
+
+    Cache evita recalcular embeddings e buscas para perguntas similares.
+    """
     config = get_config()
     rag_db_path = config.rag_db_path
 
     if not rag_db_path.exists():
         return ""
+
+    # Verificar cache primeiro
+    cache_key = f"rag:{query[:200]}"  # Limita tamanho da chave
+    cached = _rag_context_cache.get(cache_key, top_k)
+    if cached:
+        logger.debug("RAG cache hit", query_preview=query[:50])
+        return cached.get("context", "")
 
     try:
         from claude_rag_sdk.search import SearchEngine
@@ -193,7 +207,7 @@ async def search_rag_context(query: str, top_k: int = 3) -> str:
         engine = SearchEngine(
             db_path=str(rag_db_path),
             embedding_model=config.embedding_model_string,
-            enable_reranking=False,  # Mais rápido
+            enable_reranking=True,  # Re-ranking para melhor relevância
         )
         results = await engine.search(query, top_k=top_k)
 
@@ -204,7 +218,13 @@ async def search_rag_context(query: str, top_k: int = 3) -> str:
         for r in results:
             context_parts.append(f"[Fonte: {r.source}]\n{r.content[:2000]}")
 
-        return "\n\n---\n\n".join(context_parts)
+        context = "\n\n---\n\n".join(context_parts)
+
+        # Salvar no cache (TTL do .env ou 30 min default)
+        _rag_context_cache.set(cache_key, top_k, {"context": context})
+        logger.debug("RAG cache miss - salvando", query_preview=query[:50])
+
+        return context
     except Exception as e:
         logger.error("Busca RAG falhou", error=str(e))
         # Retornar mensagem de erro para o usuário saber que RAG falhou
@@ -620,7 +640,7 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                                 for i in range(0, len(text), chunk_size):
                                     chunk = text[i : i + chunk_size]
                                     yield f"data: {json.dumps({'text': chunk})}\n\n"
-                                    await asyncio.sleep(0.01)
+                                    await asyncio.sleep(0.001)  # Reduzido para menor latência
                             # Registrar tool calls no AgentFS para auditoria
                             elif hasattr(block, "name") and hasattr(block, "id"):
                                 # É um ToolUseBlock
@@ -644,21 +664,38 @@ IMPORTANTE: Use a base de conhecimento acima para responder, mas NÃO mostre, ci
                     await afs.kv.set("conversation:history", history[-100:])
                     print(f"[STREAM] Histórico salvo: {len(history)} mensagens")
 
-                    # Auto-rename: gerar título inteligente se não existir
+                    # Auto-rename: gerar título inteligente em BACKGROUND (não bloqueia resposta)
                     try:
                         existing_title = await afs.kv.get("session:title")
                         if not existing_title:
-                            from agents.title_generator import get_smart_title
+                            # Função async para rodar em background
+                            async def generate_title_background(
+                                session_id: str, user_msg: str, assistant_resp: str
+                            ):
+                                try:
+                                    from agentfs_sdk import AgentFS, AgentFSOptions
+                                    from agents.title_generator import get_smart_title
 
-                            # Gerar título inteligente com Claude
-                            auto_title = await get_smart_title(
-                                user_message=chat_request.message,
-                                assistant_response=full_response,
+                                    auto_title = await get_smart_title(
+                                        user_message=user_msg,
+                                        assistant_response=assistant_resp,
+                                    )
+                                    # Abrir nova conexão para salvar (afs original já fechou)
+                                    bg_afs = await AgentFS.open(AgentFSOptions(id=session_id))
+                                    await bg_afs.kv.set("session:title", auto_title)
+                                    await bg_afs.close()
+                                    print(f"[BG] Auto-título: {auto_title}")
+                                except Exception as e:
+                                    print(f"[BG] Erro auto-título: {e}")
+
+                            # Disparar em background - NÃO aguarda
+                            asyncio.create_task(
+                                generate_title_background(
+                                    target_session_id, chat_request.message, full_response
+                                )
                             )
-                            await afs.kv.set("session:title", auto_title)
-                            print(f"[STREAM] Auto-título inteligente: {auto_title}")
                     except Exception as title_err:
-                        print(f"[WARN] Erro ao definir auto-título: {title_err}")
+                        print(f"[WARN] Erro ao configurar auto-título: {title_err}")
                 except Exception as save_err:
                     print(f"[WARN] Erro ao salvar histórico: {save_err}")
 

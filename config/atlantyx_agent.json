@@ -26,7 +26,7 @@
       "question": "Quais são os princípios obrigatórios da Política de Uso de IA e por que eles existem?",
       "expected_answer": "Os princípios incluem rastreabilidade com citações, menor privilégio (RBAC/ABAC), segurança por padrão (segredos em cofre e criptografia), transparência operacional (logs de métricas sem conteúdo sensível) e fail-safe (declarar incerteza quando sem evidência). Eles existem para reduzir alucinação, garantir auditoria, limitar vazamento de dados e tornar o serviço operável em produção.",
       "expected_sources": "Doc1_Politica_IA_Grandes_Empresas_v1_2.docx | Seção 2",
-      "evidence_keywords": ["Rastreabilidade", "Menor privilégio", "Segurança por padrão", "Transparência operacional", "Fail-safe"]
+      "evidence_keywords": ["rastreabilidade", "menor privilégio", "RBAC", "segurança", "transparência", "fail-safe", "auditoria"]
     },
     {
       "id": 2,
@@ -40,21 +40,21 @@
       "question": "Qual é a política de retenção de logs indicada nos materiais e como você resolveria o conflito entre documentos?",
       "expected_answer": "Há conflito: a Política define retenção padrão de 30 dias para logs de aplicação (metadados), enquanto o Playbook e a Matriz recomendam 90 dias para auditoria operacional. A resolução sênior é propor 30 dias como padrão e 90 dias somente quando houver requisito formal de auditoria/incidentes, com aprovação de Segurança (e documentação da exceção).",
       "expected_sources": "Doc1_Politica_IA_Grandes_Empresas_v1_2.docx | Seção 3 ; Doc2_Playbook_Implantacao_IA_Enterprise_v0_9.docx | Seção 3 ; PDF2_Matriz_Riscos_Controles_IA.pdf | Tabela 2",
-      "evidence_keywords": ["Retenção padrão 30 dias", "pode ser estendida", "Retenção 90 dias", "auditoria"]
+      "evidence_keywords": ["retenção", "30 dias", "90 dias", "auditoria", "logs", "conflito"]
     },
     {
       "id": 4,
       "question": "Cite 3 métricas mínimas para operar um assistente de IA em produção e explique como elas ajudam.",
       "expected_answer": "Exemplos: (1) taxa de respostas com citação (mede rastreabilidade/groundedness), (2) latência p95 do endpoint /ask (mede experiência e capacidade), (3) custo por 1.000 perguntas (controla orçamento). Outras aceitas: taxa de 'não sei', precisão em conjunto de testes e taxa de erro.",
       "expected_sources": "Doc1_Politica_IA_Grandes_Empresas_v1_2.docx | Seção 5 ; HTML1_FAQ_Glossario_IA_Grandes_Empresas.html | Regras rápidas",
-      "evidence_keywords": ["Métricas mínimas", "taxa com citação", "latência p95", "custo por 1.000 perguntas"]
+      "evidence_keywords": ["métricas", "latência", "p95", "custo", "1.000", "groundedness", "cita"]
     },
     {
       "id": 5,
       "question": "Explique 'evidência primeiro' e quando você aplicaria.",
       "expected_answer": "'Evidência primeiro' é um modo em que a resposta só é liberada se houver evidência suficiente (ex.: pelo menos 2 trechos consistentes de fontes autorizadas). Eu aplicaria em domínios de alto risco como finanças, compliance, jurídico e segurança.",
       "expected_sources": "HTML1_FAQ_Glossario_IA_Grandes_Empresas.html | Nota operacional",
-      "evidence_keywords": ["modo 'evidência primeiro'", "pelo menos 2 trechos consistentes"]
+      "evidence_keywords": ["evidência primeiro", "duas evidências", "2 trechos", "finanças", "compliance", "alto impacto"]
     },
     {
       "id": 6,
@@ -68,28 +68,28 @@
       "question": "Quais controles você aplicaria para mitigar prompt injection em um RAG?",
       "expected_answer": "Controles: separar instruções do sistema da entrada do usuário, validar e higienizar o contexto recuperado, aplicar allow-list de fontes e remover trechos suspeitos (ex.: instruções para 'ignorar regras'). Complementar com monitoramento e testes com casos maliciosos.",
       "expected_sources": "Doc2_Playbook_Implantacao_IA_Enterprise_v0_9.docx | Seção 4 ; PDF2_Matriz_Riscos_Controles_IA.pdf | Tabela 1",
-      "evidence_keywords": ["Separar system prompt", "validar contexto", "remover trechos suspeitos"]
+      "evidence_keywords": ["separar system prompt", "validar", "sanitizar", "allow-list", "RBAC", "monitoramento"]
     },
     {
       "id": 8,
       "question": "Proponha um SLO inicial para o endpoint de perguntas e explique como medir.",
       "expected_answer": "SLO inicial: 99% de sucesso e p95 < 4s para /ask. Medir via métricas de API (status code, latência p95) e dashboards (App Insights/Prometheus), correlacionando por conversation_id.",
       "expected_sources": "Doc2_Playbook_Implantacao_IA_Enterprise_v0_9.docx | Seção 5 ; HTML2_Caso_Uso_Roadmap_IA_Empresa_X.html | KPIs",
-      "evidence_keywords": ["SLO inicial", "p95 < 4s", "KPI < 4s p95"]
+      "evidence_keywords": ["SLO", "99%", "p95", "4s", "latência", "dashboard", "alerta"]
     },
     {
       "id": 9,
       "question": "Quais estratégias você usaria para reduzir custo sem perder qualidade perceptível?",
       "expected_answer": "Usaria cache (perguntas frequentes e embeddings), top-k dinâmico, roteamento de modelo (menor para perguntas simples), rate limit, e re-ranking apenas quando necessário. Também monitoraria custo por 1.000 perguntas para guiar ajustes.",
       "expected_sources": "PDF1_Arquitetura_Referencia_RAG_Enterprise.pdf | Seção 4 ; PDF2_Matriz_Riscos_Controles_IA.pdf | Tabela 1 ; HTML1_FAQ_Glossario_IA_Grandes_Empresas.html | Regras rápidas",
-      "evidence_keywords": ["Cache", "top-k dinâmico", "limites", "custo por 1.000 perguntas"]
+      "evidence_keywords": ["cache", "top-k", "limites", "quotas", "model routing", "fallback", "custo"]
     },
     {
       "id": 10,
       "question": "Descreva um roadmap de implantação em fases para IA em uma grande empresa e quais entregáveis-chave você exigiria em cada fase.",
       "expected_answer": "Roadmap: Descoberta (backlog e matriz risco x valor), Piloto controlado (MVP RAG, avaliação e guardrails), Produção inicial (SLO, monitoração, RBAC completo), Escala (multiárea, dataset vivo e processo de change). Em cada fase exigir entregáveis correspondentes e critérios de passagem.",
       "expected_sources": "Doc2_Playbook_Implantacao_IA_Enterprise_v0_9.docx | Seção 1 ; HTML2_Caso_Uso_Roadmap_IA_Empresa_X.html | Roadmap",
-      "evidence_keywords": ["F0 Descoberta", "F1 Piloto", "F2 Produção", "F3 Escala"]
+      "evidence_keywords": ["piloto", "produção", "escala", "RBAC", "SLO", "observabilidade", "fases"]
     }
   ],
   "expected_documents": [

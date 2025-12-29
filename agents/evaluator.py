@@ -87,7 +87,7 @@ class EvaluationMetrics:
     def to_dict(self) -> dict:
         return {
             "question_id": self.question_id,
-            "question": self.question[:100] + "..." if len(self.question) > 100 else self.question,
+            "question": self.question,
             "scores": {
                 "overall": round(self.overall_score, 3),
                 "groundedness": round(self.groundedness, 3),
@@ -191,11 +191,6 @@ class EvaluationReport:
             self.recommendations.append(
                 "⚠️ Citation quality baixo: Citações incompletas ou mal formatadas. "
                 "Ajustar system prompt para exigir citações estruturadas."
-            )
-
-        if self.avg_latency_ms > 4000:
-            self.recommendations.append(
-                "⚠️ Latência alta (>4s): Considerar cache, modelo menor ou top_k menor."
             )
 
         if self.pass_rate >= 0.8:

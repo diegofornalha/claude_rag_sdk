@@ -77,7 +77,7 @@ class ChatRequest:
 
     message: str
     session_id: str | None = None
-    model: str = "opus"
+    model: str = "sonnet"  # haiku = mais rápido, sonnet = equilibrado, opus = mais inteligente
     resume: bool = True
     fork_session: str | None = None
     project: str = "default"
@@ -436,7 +436,7 @@ class ChatAgent:
                             for i in range(0, len(text), chunk_size):
                                 chunk = text[i : i + chunk_size]
                                 yield StreamChunk(text=chunk)
-                                await asyncio.sleep(0.01)
+                                await asyncio.sleep(0.001)  # Reduzido para menor latência
 
                         # Registrar tool calls
                         elif hasattr(block, "name") and hasattr(block, "id"):

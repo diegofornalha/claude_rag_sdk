@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import app_state
 from claude_rag_sdk.core.auth import verify_api_key
-from claude_rag_sdk.core.config import get_config
+from claude_rag_sdk.core.config import get_config, reload_config
 from claude_rag_sdk.core.rate_limiter import RATE_LIMITS, limiter
 from utils.file_watcher import get_watcher
 
@@ -313,6 +313,104 @@ async def rag_config(request: Request):
         "embedding_model": config.embedding_model_string,
         "chunk_size": config.chunk_size,
         "chunk_overlap": config.chunk_overlap,
+    }
+
+
+@router.post("/config/reload")
+async def reload_rag_config(api_key: str = Depends(verify_api_key)):
+    """Reload RAG configuration from environment variables."""
+    from dotenv import load_dotenv
+
+    # Recarrega variáveis de ambiente do .env
+    load_dotenv(override=True)
+
+    # Recarrega a configuração singleton
+    new_config = reload_config()
+
+    return {
+        "success": True,
+        "message": "Configuration reloaded from .env",
+        "config": {
+            "chunk_size": new_config.chunk_size,
+            "chunk_overlap": new_config.chunk_overlap,
+            "embedding_model": new_config.embedding_model_string,
+        },
+    }
+
+
+@router.get("/embedding-models")
+async def list_embedding_models():
+    """Lista todos os modelos de embedding disponíveis."""
+    from claude_rag_sdk.core.config import EmbeddingModel
+
+    models = []
+    for model in EmbeddingModel:
+        models.append({
+            "value": model.value,
+            "short_name": model.short_name,
+            "display_name": model.display_name,
+            "language": model.language,
+            "dimensions": model.dimensions,
+        })
+
+    current = get_config()
+    return {
+        "models": models,
+        "current": current.embedding_model.short_name,
+    }
+
+
+@router.post("/embedding-model")
+async def change_embedding_model(
+    model: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """Muda o modelo de embedding e requer reingestão dos documentos.
+
+    Args:
+        model: short_name do modelo (ex: 'bge-small', 'bertimbau-base')
+
+    Returns:
+        Confirmação da mudança. Documentos precisam ser reingeridos!
+    """
+    import os
+    from pathlib import Path
+    from dotenv import set_key
+
+    from claude_rag_sdk.core.config import EmbeddingModel, reload_config
+
+    # Validar modelo
+    valid_models = {m.short_name: m for m in EmbeddingModel}
+    if model not in valid_models:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Modelo inválido: {model}. Válidos: {list(valid_models.keys())}"
+        )
+
+    new_model = valid_models[model]
+
+    # Atualizar .env
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        set_key(str(env_path), "EMBEDDING_MODEL", model)
+
+    # Também definir no ambiente atual
+    os.environ["EMBEDDING_MODEL"] = model
+
+    # Recarregar config
+    new_config = reload_config()
+
+    return {
+        "success": True,
+        "message": f"Modelo alterado para {new_model.display_name}. IMPORTANTE: Execute reingestão dos documentos!",
+        "model": {
+            "value": new_model.value,
+            "short_name": new_model.short_name,
+            "display_name": new_model.display_name,
+            "language": new_model.language,
+            "dimensions": new_model.dimensions,
+        },
+        "requires_reingest": True,
     }
 
 
