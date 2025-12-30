@@ -220,6 +220,140 @@ class IngestResult:
 └──────────┘ └──────────┘ └──────────┘
 ```
 
+## AgentFS: Blob Storage e Gerenciamento de Estado
+
+### O que é AgentFS?
+
+**AgentFS** é um SDK de filesystem virtual que funciona como **Blob Storage local** usando SQLite. Ele resolve problemas críticos para o funcionamento do RAG, armazenando todos os dados como blobs (Binary Large Objects) dentro de arquivos `.db` por sessão.
+
+```
+.agentfs/
+└── {session_id}.db (SQLite)
+    ├── KV Store      → Blobs JSON (metadados, histórico)
+    ├── Filesystem    → Blobs binários (artefatos, PDFs)
+    └── Tool Tracking → Blobs JSON (auditoria)
+```
+
+### Por que AgentFS é essencial para o RAG?
+
+#### 1. **Persistência de Conversações (KV Store)**
+```python
+# Salva histórico de conversas como blob JSON
+await rag.kv.set('conversation:history', [
+    {"role": "user", "content": "O que é RAG?"},
+    {"role": "assistant", "content": "RAG é..."}
+])
+
+# Salva metadados da sessão
+await rag.kv.set('session:info', {
+    "user_id": "user-123",
+    "title": "Conversa sobre RAG",
+    "favorite": True
+})
+```
+
+**Por que é importante:**
+- ✅ Histórico completo de conversas persistido automaticamente
+- ✅ Contexto mantido entre restarts do servidor
+- ✅ Queries complexas mantêm estado (multi-turn conversations)
+
+#### 2. **Armazenamento de Artefatos (Filesystem Virtual)**
+```python
+# Claude gera código/relatórios e salva como blobs
+await rag.fs.write_file('/artifacts/report.pdf', pdf_bytes)
+await rag.fs.write_file('/output/analysis.json', json_data)
+
+# Lista todos os artefatos criados
+files = await rag.fs.list_directory('/artifacts')
+```
+
+**Por que é importante:**
+- ✅ Artefatos gerados pelo Claude ficam persistidos
+- ✅ Não perde arquivos entre requests
+- ✅ Permite download posterior dos resultados
+
+#### 3. **Auditoria de Tool Calls (Tool Tracking)**
+```python
+# AgentFS rastreia automaticamente todas as ferramentas usadas
+stats = await rag.tools.get_stats()
+# {'search': 15, 'ingest_document': 3, 'query': 8}
+
+# Histórico completo de calls
+history = await rag.tools.get_history()
+# [{"tool": "search", "args": {...}, "result": {...}, "timestamp": "..."}]
+```
+
+**Por que é importante:**
+- ✅ Debug: vê exatamente quais buscas foram feitas
+- ✅ Métricas: quantas vezes cada ferramenta foi usada
+- ✅ Compliance: auditoria completa de operações
+
+#### 4. **Blob Storage Inteligente**
+
+AgentFS usa SQLite como **blob storage**, armazenando tudo como bytes:
+
+```sql
+-- Estrutura interna (simplificada)
+CREATE TABLE kv_store (
+    key TEXT PRIMARY KEY,
+    value BLOB  -- JSON serializado como blob
+);
+
+CREATE TABLE filesystem (
+    path TEXT PRIMARY KEY,
+    content BLOB  -- Arquivo completo como blob
+);
+
+CREATE TABLE tool_calls (
+    id INTEGER PRIMARY KEY,
+    data BLOB  -- Metadata JSON como blob
+);
+```
+
+**Vantagens do Blob Storage SQLite:**
+- 🚀 **Performance**: Acesso local rápido (sem rede)
+- 💾 **Atomicidade**: Transações ACID garantidas
+- 📦 **Portabilidade**: 1 arquivo `.db` = sessão completa
+- 🔒 **Confiabilidade**: Sem corrupção de dados (WAL mode)
+- 🪶 **Leve**: Sem overhead de serviços externos (S3, Azure Blob)
+
+### Comparação: AgentFS vs Blob Storage Cloud
+
+| Aspecto | AgentFS (SQLite Blob) | Azure Blob / S3 |
+|---------|----------------------|-----------------|
+| **Latência** | <1ms (local) | 50-200ms (rede) |
+| **Custo** | Zero | Pay-per-GB + egress |
+| **Setup** | Zero config | Credenciais, SDK, bucket |
+| **ACID** | Sim (transações SQLite) | Eventual consistency |
+| **Escala** | Até 1GB por sessão | Petabytes |
+| **Uso ideal** | Sessões individuais | Storage compartilhado |
+
+### Como o RAG usa AgentFS internamente
+
+```python
+# Fluxo completo de uma query RAG
+async with await ClaudeRAG.open(ClaudeRAGOptions(id='session-123')) as rag:
+    # 1. Busca vetorial (sqlite-vec para embeddings)
+    results = await rag.search('Como funciona o cache?')
+
+    # 2. Salva resultados no KV Store (blob)
+    await rag.kv.set('last_search_results', [r.to_dict() for r in results])
+
+    # 3. Query Claude com contexto
+    response = await rag.query('Explique em detalhes')
+
+    # 4. Salva resposta completa (blob)
+    await rag.kv.set('conversation:history', [...])
+
+    # 5. Se Claude gerou artefato, salva no filesystem (blob)
+    await rag.fs.write_file('/artifacts/explanation.md', response.answer)
+
+    # 6. Auditoria automática (blob)
+    # tool_calls registrados: search (1x), query (1x)
+```
+
+**Tudo armazenado em**: `.agentfs/session-123.db` (único arquivo SQLite)
+
 ## Core Modules
 
 The SDK includes battle-tested core modules:

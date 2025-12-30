@@ -14,6 +14,20 @@ from utils.file_watcher import get_watcher
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
 
+@router.get("/dev-key")
+async def get_dev_key():
+    """Get development API key (only in development mode)."""
+    environment = os.getenv("ENVIRONMENT", "development")
+    if environment != "development":
+        raise HTTPException(status_code=403, detail="Not available in production")
+
+    api_key = os.getenv("RAG_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=404, detail="No API key configured")
+
+    return {"dev_key": api_key}
+
+
 def _get_rag_db_path() -> Path:
     """Obtém caminho do RAG database da config centralizada."""
     return get_config().rag_db_path
@@ -268,6 +282,54 @@ async def reingest_sdk(request: Request, api_key: str = Depends(verify_api_key))
         raise
     except Exception as e:
         print(f"[ERROR] SDK reingest failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/reingest/docs")
+@limiter.limit(RATE_LIMITS.get("ingest", "10/minute"))
+async def reingest_docs(request: Request, clear: bool = False, api_key: str = Depends(verify_api_key)):
+    """Reingest documents from ingest/ folder (PDFs, TXT, DOCX, etc).
+
+    Args:
+        clear: If True, clear database before ingesting
+    """
+    import asyncio
+    from pathlib import Path
+
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    ingest_dir = Path(__file__).parent.parent / "ingest"
+
+    try:
+        args = ["python", str(scripts_dir / "ingest.py"), "--dir", str(ingest_dir)]
+        if clear:
+            args.append("--clear")
+
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(scripts_dir.parent),
+        )
+
+        stdout, stderr = await process.communicate()
+        output = stdout.decode("utf-8") + stderr.decode("utf-8")
+
+        if process.returncode == 0:
+            return {
+                "success": True,
+                "output": output,
+                "message": "Documentos reingeridos com sucesso",
+            }
+        else:
+            return {
+                "success": False,
+                "output": output,
+                "error": f"Script retornou código {process.returncode}",
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Docs reingest failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

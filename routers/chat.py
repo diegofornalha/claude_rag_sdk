@@ -216,7 +216,7 @@ async def search_rag_context(query: str, top_k: int = 5) -> str:
 
         context_parts = []
         for r in results:
-            context_parts.append(f"[Fonte: {r.source}]\n{r.content[:2000]}")
+            context_parts.append(f"[Fonte: {r.source}]\n{r.content[:4000]}")
 
         context = "\n\n---\n\n".join(context_parts)
 

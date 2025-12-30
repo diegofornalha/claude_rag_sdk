@@ -32,6 +32,7 @@ from routers import (
     fs_router,
     is_mcp_available,
     mcp_router,
+    quiz_router,
     rag_router,
     sessions_router,
 )
@@ -201,6 +202,7 @@ app.include_router(v1_router, prefix="/v1", tags=["v1"])
 # Routers sem prefixo - compatibilidade legada (deprecated)
 app.include_router(chat_router)
 app.include_router(rag_router)
+app.include_router(quiz_router)
 app.include_router(sessions_router)
 app.include_router(artifacts_router)
 app.include_router(audit_router)

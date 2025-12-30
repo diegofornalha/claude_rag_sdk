@@ -8,6 +8,9 @@ from .fs import router as fs_router
 from .rag import router as rag_router
 from .sessions import router as sessions_router
 
+# Quiz router refatorado (usa novo módulo quiz/)
+from quiz.router import router as quiz_router
+
 # MCP router é opcional - pode ser removido sem afetar o sistema
 try:
     from .mcp_ingest import router as mcp_router
@@ -21,6 +24,7 @@ __all__ = [
     "audit_router",
     "chat_router",
     "evaluate_router",
+    "quiz_router",
     "rag_router",
     "sessions_router",
     "artifacts_router",

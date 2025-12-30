@@ -406,6 +406,14 @@ def get_current_session_id() -> str | None:
     return None
 
 
+async def get_rag():
+    """Get ClaudeRAG instance with fixed ID for persistent documents."""
+    from claude_rag_sdk import ClaudeRAG, ClaudeRAGOptions
+
+    # Use fixed ID so documents persist across server restarts
+    return await ClaudeRAG.open(ClaudeRAGOptions(id="rag-knowledge-base"))
+
+
 async def cleanup():
     """Cleanup resources on shutdown.
 

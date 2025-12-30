@@ -235,9 +235,9 @@ async def main():
 
     stats = engine.stats
     print("\n📈 Banco atualizado:")
-    print(f"   Documentos:  {stats['total_documents']}")
-    print(f"   Embeddings:  {stats['total_embeddings']}")
-    print(f"   Conteudo:    {stats['total_size_bytes']:,} bytes")
+    print(f"   Documentos:  {stats.get('total_documents', 0)}")
+    print(f"   Embeddings:  {stats.get('total_embeddings', stats.get('total_chunks', 0))}")
+    print(f"   Conteudo:    {stats.get('total_size_bytes', 0):,} bytes")
 
 
 if __name__ == "__main__":
