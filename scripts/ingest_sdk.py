@@ -74,7 +74,7 @@ def collect_sdk_files() -> list[tuple[Path, str]]:
 
 
 async def main():
-    db_path = BACKEND_PATH / "data" / "rag_knowledge.db"
+    db_path = BACKEND_PATH / "data" / "regulamento.db.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     print("📦 Claude Agent SDK Python")

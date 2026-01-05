@@ -223,12 +223,12 @@ async def cleanup_deleted_files(
         try:
             from claude_rag_sdk.search import SearchEngine
 
-            SearchEngine(db_path=str(BACKEND_PATH / "data" / "rag_knowledge.db"))
+            SearchEngine(db_path=str(BACKEND_PATH / "data" / "regulamento.db.db"))
 
             # Buscar por source exato
             import sqlite3
 
-            with sqlite3.connect(str(BACKEND_PATH / "data" / "rag_knowledge.db")) as conn:
+            with sqlite3.connect(str(BACKEND_PATH / "data" / "regulamento.db.db")) as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("SELECT id FROM documentos WHERE nome LIKE ?", (f"%{rel_path}%",))
@@ -254,7 +254,7 @@ async def main():
     stats_only = "--stats" in sys.argv
 
     # Banco de dados de saída
-    db_path = BACKEND_PATH / "data" / "rag_knowledge.db"
+    db_path = BACKEND_PATH / "data" / "regulamento.db.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     print("📦 Backend Chat-Simples")

@@ -368,7 +368,7 @@ async def _run_ingest_task(
             import sqlite3
             from pathlib import Path
 
-            db_path = Path.cwd() / "data" / "rag_knowledge.db"
+            db_path = Path.cwd() / "data" / "regulamento.db.db"
             logger.info(f"[DEBUG] DB path: {db_path}, exists: {db_path.exists()}")
 
             if db_path.exists():

@@ -216,7 +216,7 @@ async def run_ingest(
         return
 
     # Configura engine de ingestão
-    db_path = Path(__file__).parent.parent / "data" / "rag_knowledge.db"
+    db_path = Path(__file__).parent.parent / "data" / "regulamento.db.db"
     engine = IngestEngine(
         db_path=str(db_path),
         embedding_model="BAAI/bge-small-en-v1.5",

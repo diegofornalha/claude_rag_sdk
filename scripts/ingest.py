@@ -35,7 +35,7 @@ from claude_rag_sdk.ingest import IngestEngine
 from claude_rag_sdk.options import ChunkingStrategy
 
 # Configuracoes padrao
-DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "rag_knowledge.db"
+DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "regulamento.db.db"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_CHUNK_SIZE = 500
 DEFAULT_CHUNK_OVERLAP = 50

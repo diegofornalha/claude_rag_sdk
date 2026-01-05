@@ -101,7 +101,7 @@ async def main():
     stats_only = "--stats" in sys.argv
 
     # Banco de dados de saída
-    db_path = Path(__file__).parent.parent / "data" / "rag_knowledge.db"
+    db_path = Path(__file__).parent.parent / "data" / "regulamento.db.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     print("📦 Claude Agent SDK Python")
